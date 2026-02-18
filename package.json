@@ -1,0 +1,39 @@
+{
+  "name": "regen-compute-credits",
+  "version": "0.1.0",
+  "description": "An MCP agent that funds verified ecological regeneration from AI compute usage via Regen Network",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "mcp",
+    "regen-network",
+    "ecological-credits",
+    "ai-compute",
+    "carbon-credits",
+    "biodiversity",
+    "climate"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/regen-network/regen-compute-credits"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.5.0"
+  }
+}
