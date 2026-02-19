@@ -9,24 +9,20 @@ Every AI session consumes energy. Regen Compute Credits turns that consumption i
 ### Install via npx (recommended)
 
 ```bash
-claude mcp add regen-compute-credits -- npx regen-compute-credits
+claude mcp add -s user regen-compute-credits -- npx regen-compute-credits
 ```
 
-That's it. The server is now available in your Claude Code sessions.
-
-### Or install globally
-
-```bash
-npm install -g regen-compute-credits
-claude mcp add regen-compute-credits -- regen-compute-credits
-```
+That's it. The server is now available in all your Claude Code sessions.
 
 ### Or add to MCP settings manually
+
+Add to your Claude Code config (`~/.claude.json`):
 
 ```json
 {
   "mcpServers": {
     "regen-compute-credits": {
+      "type": "stdio",
       "command": "npx",
       "args": ["regen-compute-credits"]
     }
