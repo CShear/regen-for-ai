@@ -1,6 +1,6 @@
 {
   "name": "regen-compute-credits",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "MCP server that connects AI compute usage to verified ecological credit retirement on Regen Network. Estimate your session footprint, browse carbon and biodiversity credits, and retire them on-chain via credit card.",
   "type": "module",
   "main": "dist/index.js",
@@ -52,7 +52,10 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@cosmjs/proto-signing": "^0.32.4",
+    "@cosmjs/stargate": "^0.32.4",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@regen-network/api": "^1.0.0-alpha8"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

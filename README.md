@@ -40,7 +40,8 @@ Regen Compute Credits MCP Server
     │
     ├── Estimates session ecological footprint
     ├── Browses available credits on Regen Marketplace
-    ├── Links to credit card purchase & retirement
+    ├── Retires credits directly on-chain (with wallet)
+    │   OR links to credit card purchase (without wallet)
     └── Returns verifiable retirement certificate
             │
             ▼
@@ -154,9 +155,43 @@ Shows aggregate ecological impact statistics from Regen Network — live on-chai
 
 ### `retire_credits`
 
-Generates a link to retire ecocredits via credit card on Regen Marketplace. No crypto wallet needed.
+Retires ecocredits on Regen Network. Operates in two modes:
+
+- **With wallet configured** (`REGEN_WALLET_MNEMONIC` set): Executes a `MsgBuyDirect` on-chain, purchasing and retiring credits in a single transaction. Returns a retirement certificate.
+- **Without wallet**: Returns a marketplace link for credit card purchase (no crypto wallet needed).
+
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `credit_class` | Credit class to retire (e.g., 'C01', 'BT01'). Optional. |
+| `quantity` | Number of credits to retire. Optional (defaults to 1). |
+| `beneficiary_name` | Name for the retirement certificate. Optional. |
+| `jurisdiction` | Retirement jurisdiction (ISO 3166-1, e.g., 'US', 'DE'). Optional. |
+| `reason` | Reason for retiring credits (recorded on-chain). Optional. |
 
 **When it's used:** The user wants to take action and actually fund ecological regeneration.
+
+## Direct On-Chain Retirement
+
+To enable direct retirement (no marketplace visit needed), set `REGEN_WALLET_MNEMONIC` in your environment. The MCP server will:
+
+1. Find the cheapest matching sell orders on-chain
+2. Check your wallet balance can cover the cost
+3. Sign and broadcast a `MsgBuyDirect` with auto-retire enabled
+4. Poll the indexer for the retirement certificate
+5. Return a full retirement certificate with on-chain proof
+
+If anything fails, it falls back to a marketplace link — users are never stuck.
+
+```bash
+# Enable direct retirement
+export REGEN_WALLET_MNEMONIC="your 24 word mnemonic here"
+export REGEN_RPC_URL=https://mainnet.regen.network:26657
+export REGEN_CHAIN_ID=regen-1
+```
+
+See `.env.example` for all configuration options.
 
 ## MCP Prompts
 
@@ -171,9 +206,9 @@ The server also provides prompt templates for common workflows:
 
 - **Regenerative contribution, not carbon offset.** We fund verified ecological regeneration. We do not claim carbon neutrality.
 - **On-chain and immutable.** Every retirement is recorded on Regen Ledger — verifiable, non-reversible.
-- **No crypto wallet needed.** Purchase via credit card on Regen Marketplace.
+- **Two modes:** With a wallet, credits are retired directly on-chain. Without a wallet, purchase via credit card on Regen Marketplace.
 - **Multiple credit types.** Carbon, biodiversity, marine, soil, and species stewardship credits.
-- **All tools are read-only.** Safe to use at any time. No transactions are executed by this server.
+- **Graceful fallback.** If direct retirement fails for any reason, a marketplace link is returned instead.
 
 ## Data Sources
 
@@ -199,7 +234,8 @@ npm run typecheck # Type checking
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| **Phase 1** | MCP server — footprint estimation, credit browsing, marketplace links, certificates | In Progress |
+| **Phase 1** | MCP server — footprint estimation, credit browsing, marketplace links, certificates | Complete |
+| **Phase 1.5** | Direct on-chain retirement — wallet signing, best-price order routing, payment provider interface | Complete |
 | **Phase 2** | Subscription pool — Stripe, monthly batch retirements, fractional attribution | Planned |
 | **Phase 3** | CosmWasm pool contract — on-chain aggregation, automated retirement, REGEN burn | Planned |
 | **Phase 4** | Scale — enterprise API, platform partnerships, credit supply development | Planned |

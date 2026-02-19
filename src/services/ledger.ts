@@ -41,6 +41,13 @@ export interface SellOrder {
   ask_denom: string;
   ask_amount: string;
   disable_auto_retire: boolean;
+  expiration: string | null;
+}
+
+export interface AllowedDenom {
+  bank_denom: string;
+  display_denom: string;
+  exponent: number;
 }
 
 async function fetchJSON<T>(path: string): Promise<T> {
@@ -81,4 +88,11 @@ export async function listSellOrders(): Promise<SellOrder[]> {
     "/regen/ecocredit/marketplace/v1/sell-orders"
   );
   return data.sell_orders;
+}
+
+export async function getAllowedDenoms(): Promise<AllowedDenom[]> {
+  const data = await fetchJSON<{ allowed_denoms: AllowedDenom[] }>(
+    "/regen/ecocredit/marketplace/v1/allowed-denoms"
+  );
+  return data.allowed_denoms;
 }

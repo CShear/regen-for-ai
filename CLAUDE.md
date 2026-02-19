@@ -30,28 +30,37 @@ Read `docs/analysis.md` for the full business analysis. Key points:
 ```
 src/
 ├── index.ts              # MCP server entry point, tool/prompt registration, server instructions
+├── config.ts             # Centralized env config, isWalletConfigured() gate
 ├── tools/
 │   ├── footprint.ts      # estimate_session_footprint tool
 │   ├── credits.ts        # browse_available_credits tool (live sell order aggregation)
 │   ├── certificates.ts   # get_retirement_certificate tool (nodeId + txHash lookup)
 │   ├── impact.ts         # get_impact_summary tool
-│   └── retire.ts         # retire_credits tool (marketplace link)
+│   └── retire.ts         # retire_credits tool (on-chain execution OR marketplace link)
 ├── services/
 │   ├── ledger.ts         # Regen Ledger REST client (lcd-regen.keplr.app)
 │   ├── indexer.ts        # Regen Indexer GraphQL client (api.regen.network)
-│   └── estimator.ts      # Footprint estimation heuristics
+│   ├── estimator.ts      # Footprint estimation heuristics
+│   ├── wallet.ts         # Cosmos wallet init, sign+broadcast (singleton)
+│   ├── order-selector.ts # Best-price sell order routing (cheapest-first greedy fill)
+│   └── payment/
+│       ├── types.ts      # PaymentProvider interface (authorize → capture two-phase)
+│       ├── crypto.ts     # CryptoPaymentProvider (balance check, no-op capture)
+│       └── stripe-stub.ts # Placeholder for Regen team Stripe integration
 ```
 
 ## MCP Features
 
-- **Server instructions**: Detailed guidance for when/why to use this server, injected into model system prompt
-- **Tool annotations**: All tools marked `readOnlyHint: true`, `destructiveHint: false`
+- **Server instructions**: Detailed guidance for when/why to use this server, injected into model system prompt. Adapts based on wallet configuration.
+- **Tool annotations**: Read-only tools stay `readOnlyHint: true`. `retire_credits` becomes `destructiveHint: true` when wallet is configured (executes real transactions).
 - **Prompt templates**: `offset_my_session` (footprint → browse → retire workflow), `show_regen_impact` (network stats)
 - **Live data**: Marketplace snapshot computed from real sell orders, not hardcoded
+- **Two-mode retirement**: `retire_credits` executes on-chain when `REGEN_WALLET_MNEMONIC` is set, otherwise returns marketplace link (fully backward compatible)
 
 ## Build Phases
 
-- **Phase 1 (current)**: Read-only MCP server. Footprint estimation, credit browsing, certificate retrieval, marketplace purchase links.
+- **Phase 1** (complete): Read-only MCP server. Footprint estimation, credit browsing, certificate retrieval, marketplace purchase links.
+- **Phase 1.5** (current): Direct on-chain retirement. Wallet signing, best-price order routing, `MsgBuyDirect` with auto-retire, `PaymentProvider` interface for Stripe.
 - **Phase 2**: Stripe subscription pool. Monthly batch retirements with fractional attribution.
 - **Phase 3**: CosmWasm smart contract for on-chain pool aggregation and REGEN burn.
 - **Phase 4**: Enterprise API, platform partnerships, credit supply development.
@@ -59,9 +68,11 @@ src/
 ## Key Design Decisions
 
 1. **Heuristic footprint, not precise metering** — MCP servers cannot see Claude's internal compute. We estimate based on session duration and tool call count. Label clearly as an estimate.
-2. **Link to existing marketplace, don't rebuild payment** — Phase 1 opens the Regen Marketplace credit card flow. We don't handle money until Phase 2.
+2. **Graceful degradation** — When no wallet is configured, retire_credits returns marketplace links (Phase 1 behavior). When wallet is configured, it executes on-chain. Every error in the on-chain path falls back to a marketplace link — users are never stuck.
 3. **Both carbon AND biodiversity credits** — Biodiversity is the deeper inventory pool. Mix both for narrative strength ("ecological regeneration" > "carbon offset").
 4. **Certificates are the shareable artifact** — The `regen.network/certificate/XYZ` page is the most viral, defensible piece. Prioritize making it beautiful and linkable.
+5. **Two-phase payment** — `PaymentProvider` uses authorize → capture pattern. For crypto: authorize = balance check, capture = no-op. For Stripe (future): authorize = hold card, capture = charge after on-chain success. This prevents charging users for failed transactions.
+6. **Cheapest-first order routing** — `order-selector.ts` sorts eligible sell orders by `ask_amount` ascending and fills greedily across multiple orders if needed.
 
 ## Regen Ledger API Notes
 
@@ -75,6 +86,14 @@ src/
 - Indexer GraphQL supports `condition` arg (not `filter`) for field-level queries
 - `txByHash` returns null — use `allRetirements(condition: { txHash: ... })` instead
 
+## Tech Stack (Phase 1.5 additions)
+
+- **@cosmjs/proto-signing** + **@cosmjs/stargate**: Cosmos SDK wallet and transaction signing
+- **@regen-network/api**: Pre-built proto registry for all Regen message types (MsgBuyDirect, MsgRetire, etc.)
+- **Wallet**: `DirectSecp256k1HdWallet.fromMnemonic()` with `regen` address prefix
+- **Signing client**: `SigningStargateClient` with Regen proto registry, auto gas estimation
+- **RPC**: Configurable via `REGEN_RPC_URL` (default: `mainnet.regen.network:26657`)
+
 ## Conventions
 
 - Use ESM imports (`import`, not `require`)
@@ -82,3 +101,4 @@ src/
 - Error handling: throw typed errors, let MCP SDK handle serialization
 - Tool descriptions should include trigger language ("Use this when...") — Claude reads them as context
 - Config via environment variables (dotenv in dev, system env in production)
+- `isWalletConfigured()` from `config.ts` is the single gate for all conditional behavior

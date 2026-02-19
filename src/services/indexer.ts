@@ -203,6 +203,23 @@ export async function getRecentOrders(
   return data.allOrders.nodes;
 }
 
+/**
+ * Poll the indexer until the retirement from a given tx hash is indexed.
+ * Returns the retirement record or null if it doesn't appear within the timeout.
+ */
+export async function waitForRetirement(
+  txHash: string,
+  maxAttempts: number = 10,
+  intervalMs: number = 3000
+): Promise<Retirement | null> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const retirement = await getRetirementById(txHash);
+    if (retirement) return retirement;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return null;
+}
+
 export async function getOrderStats(): Promise<{ totalOrders: number }> {
   const query = `
     query OrderStats {

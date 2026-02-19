@@ -6,11 +6,17 @@ import { browseAvailableCredits } from "./tools/credits.js";
 import { getRetirementCertificate } from "./tools/certificates.js";
 import { getImpactSummary } from "./tools/impact.js";
 import { retireCredits } from "./tools/retire.js";
+import { loadConfig, isWalletConfigured } from "./config.js";
+
+// Load config early so isWalletConfigured() is available for annotations
+loadConfig();
+
+const walletMode = isWalletConfigured();
 
 const server = new McpServer(
   {
     name: "regen-compute-credits",
-    version: "0.1.1",
+    version: "0.2.0",
   },
   {
     instructions: [
@@ -27,16 +33,35 @@ const server = new McpServer(
       "KEY CONCEPTS:",
       "- This is 'regenerative contribution,' NOT 'carbon offset.' We fund verified ecological regeneration.",
       "- Credits are retired on-chain on Regen Ledger — immutable, verifiable, non-reversible.",
-      "- No crypto wallet needed. Purchase via credit card on Regen Marketplace.",
+      ...(walletMode
+        ? [
+            "- A wallet is configured. The retire_credits tool can execute purchases and retirements directly on-chain.",
+            "- No extra steps needed — just call retire_credits with a quantity and credits will be retired automatically.",
+          ]
+        : [
+            "- No crypto wallet needed. Purchase via credit card on Regen Marketplace.",
+          ]),
       "- Credit types: Carbon (C), Biodiversity/Terrasos (BT), Kilo-Sheep-Hour (KSH), Marine Biodiversity (MBS), Umbrella Species Stewardship (USS).",
       "",
       "TYPICAL WORKFLOW:",
       "1. estimate_session_footprint — see the ecological cost of this AI session",
       "2. browse_available_credits — explore what credits are available",
-      "3. retire_credits — get a purchase link to retire credits via credit card",
+      ...(walletMode
+        ? [
+            "3. retire_credits — directly purchase and retire credits on-chain (returns a retirement certificate)",
+          ]
+        : [
+            "3. retire_credits — get a purchase link to retire credits via credit card",
+          ]),
       "4. get_retirement_certificate — verify an on-chain retirement",
       "",
-      "All tools in this server are read-only and safe to call at any time.",
+      ...(walletMode
+        ? [
+            "The retire_credits tool executes real on-chain transactions. Credits are permanently retired.",
+          ]
+        : [
+            "All tools in this server are read-only and safe to call at any time.",
+          ]),
     ].join("\n"),
   }
 );
@@ -128,10 +153,12 @@ server.tool(
   }
 );
 
-// Tool: Retire credits via Regen Marketplace
+// Tool: Retire credits — either direct on-chain execution or marketplace link
 server.tool(
   "retire_credits",
-  "Generates a link to retire ecocredits on Regen Network marketplace via credit card. Use this when the user wants to take action — offset their footprint, fund ecological regeneration, or retire credits for any reason. Credits are permanently retired on-chain with the user's name as beneficiary. No crypto wallet needed. Returns a direct marketplace link and step-by-step instructions.",
+  walletMode
+    ? "Purchases and retires ecocredits directly on-chain on Regen Network. Use this when the user wants to take action — offset their footprint, fund ecological regeneration, or retire credits. Credits are permanently retired on-chain in a single transaction. Returns a retirement certificate with on-chain proof."
+    : "Generates a link to retire ecocredits on Regen Network marketplace via credit card. Use this when the user wants to take action — offset their footprint, fund ecological regeneration, or retire credits for any reason. Credits are permanently retired on-chain with the user's name as beneficiary. No crypto wallet needed. Returns a direct marketplace link and step-by-step instructions.",
   {
     credit_class: z
       .string()
@@ -147,22 +174,34 @@ server.tool(
       .string()
       .optional()
       .describe("Name to appear on the retirement certificate"),
+    jurisdiction: z
+      .string()
+      .optional()
+      .describe(
+        "Retirement jurisdiction (ISO 3166-1 alpha-2 country code, e.g., 'US', 'DE', or sub-national like 'US-OR')"
+      ),
+    reason: z
+      .string()
+      .optional()
+      .describe("Reason for retiring credits (recorded on-chain)"),
   },
   {
-    readOnlyHint: true,
-    destructiveHint: false,
-    idempotentHint: true,
-    openWorldHint: false,
+    readOnlyHint: !walletMode,
+    destructiveHint: walletMode,
+    idempotentHint: !walletMode,
+    openWorldHint: walletMode,
   },
-  async ({ credit_class, quantity, beneficiary_name }) => {
-    return retireCredits(credit_class, quantity, beneficiary_name);
+  async ({ credit_class, quantity, beneficiary_name, jurisdiction, reason }) => {
+    return retireCredits(credit_class, quantity, beneficiary_name, jurisdiction, reason);
   }
 );
 
 // Prompt: Offset my AI session
 server.prompt(
   "offset_my_session",
-  "Estimate the ecological footprint of your current AI session and get a link to retire ecocredits to fund regeneration.",
+  walletMode
+    ? "Estimate the ecological footprint of your current AI session and directly retire ecocredits on-chain to fund regeneration."
+    : "Estimate the ecological footprint of your current AI session and get a link to retire ecocredits to fund regeneration.",
   {
     session_minutes: z
       .string()
@@ -188,7 +227,9 @@ server.prompt(
               `Please:`,
               `1. Use estimate_session_footprint to calculate my session's footprint`,
               `2. Use browse_available_credits to show me what credits are available`,
-              `3. Use retire_credits to give me a link to retire enough credits to cover my session's impact`,
+              ...(walletMode
+                ? [`3. Use retire_credits to directly retire enough credits to cover my session's impact`]
+                : [`3. Use retire_credits to give me a link to retire enough credits to cover my session's impact`]),
               ``,
               `Frame this as funding ecological regeneration, not just carbon offsetting.`,
             ].join("\n"),
@@ -228,7 +269,9 @@ server.prompt(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Regen Compute Credits MCP server running");
+  console.error(
+    `Regen Compute Credits MCP server running (wallet mode: ${walletMode ? "enabled" : "disabled"})`
+  );
 }
 
 main().catch(console.error);
