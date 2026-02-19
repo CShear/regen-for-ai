@@ -1,5 +1,5 @@
 const MARKETPLACE_URL =
-  process.env.REGEN_MARKETPLACE_URL || "https://registry.regen.network";
+  process.env.REGEN_MARKETPLACE_URL || "https://app.regen.network";
 
 export async function retireCredits(
   creditClass?: string,
@@ -9,13 +9,7 @@ export async function retireCredits(
   // Generate a marketplace link — Phase 1 routes to the existing web UI
   // Phase 2+ will handle purchase directly via subscription pool
 
-  let url = MARKETPLACE_URL;
-  const params: string[] = [];
-
-  if (creditClass) {
-    // Link to a specific project page if class is provided
-    url = `${MARKETPLACE_URL}/credit-classes/${creditClass}`;
-  }
+  const url = `${MARKETPLACE_URL}/projects/1?buying_options_filters=credit_card`;
 
   const lines: string[] = [
     `## Retire Ecocredits on Regen Network`,
@@ -37,7 +31,7 @@ export async function retireCredits(
   lines.push(``);
   lines.push(`Visit the Regen Marketplace to complete your credit retirement:`);
   lines.push(``);
-  lines.push(`**[${url}](${url})**`);
+  lines.push(`**[app.regen.network](${url})**`);
   lines.push(``);
   lines.push(`**How it works:**`);
   lines.push(`1. Browse available credits on the marketplace`);

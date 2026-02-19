@@ -54,7 +54,7 @@ export async function getImpactSummary() {
       `- **Multiple ecosystems**: Carbon, biodiversity, soil, marine — holistic regeneration`,
       `- **Direct impact**: Credits fund real projects with verified ecological outcomes`,
       ``,
-      `Browse and retire credits at [registry.regen.network](https://registry.regen.network)`
+      `Browse and retire credits at [app.regen.network](https://app.regen.network/projects/1?buying_options_filters=credit_card)`
     );
 
     return { content: [{ type: "text" as const, text: lines.join("\n") }] };

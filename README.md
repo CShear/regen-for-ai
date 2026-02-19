@@ -181,7 +181,7 @@ The server also provides prompt templates for common workflows:
 |--------|------------------|
 | [Regen Ledger REST](https://lcd-regen.keplr.app) | Credit classes, projects, batches, sell orders |
 | [Regen Indexer GraphQL](https://api.regen.network/indexer/v1/graphql) | Retirement certificates, marketplace orders, aggregate stats |
-| [Regen Marketplace](https://registry.regen.network) | Credit card purchase flow, project pages |
+| [Regen Marketplace](https://app.regen.network) | Credit card purchase flow, project pages |
 
 ## Development
 

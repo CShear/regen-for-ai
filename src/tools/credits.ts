@@ -65,7 +65,7 @@ export async function browseAvailableCredits(
       `## Available Ecocredits on Regen Network`,
       ``,
       `Regen Marketplace currently offers credits across ${filteredClasses.length} credit classes.`,
-      `Purchase with credit card at [registry.regen.network](https://registry.regen.network) — no crypto wallet needed.`,
+      `Purchase with credit card at [app.regen.network](https://app.regen.network/projects/1?buying_options_filters=credit_card) — no crypto wallet needed.`,
       ``,
     ];
 
@@ -123,7 +123,7 @@ export async function browseAvailableCredits(
       }
     } else {
       lines.push(
-        `*Sell order data is available on the marketplace web app at [registry.regen.network](https://registry.regen.network).*`
+        `*Sell order data is available on the marketplace web app at [app.regen.network](https://app.regen.network/projects/1?buying_options_filters=credit_card).*`
       );
     }
 
@@ -140,7 +140,7 @@ export async function browseAvailableCredits(
       content: [
         {
           type: "text" as const,
-          text: `Error fetching credits: ${message}\n\nYou can browse credits directly at https://registry.regen.network`,
+          text: `Error fetching credits: ${message}\n\nYou can browse credits directly at https://app.regen.network/projects/1?buying_options_filters=credit_card`,
         },
       ],
       isError: true,

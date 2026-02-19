@@ -13,7 +13,7 @@
 - [ ] Regen Ledger REST client (credit classes, projects, batches, sell orders)
 - [ ] Regen Indexer GraphQL client (retirement certificates, aggregations)
 - [ ] Footprint estimation heuristic (session duration + tool call count → CO2e estimate)
-- [ ] Marketplace purchase link generator (pre-filled URL to registry.regen.network)
+- [ ] Marketplace purchase link generator (pre-filled URL to app.regen.network)
 - [ ] OAuth/email authentication (user identity for retirement certificates)
 - [ ] Documentation and installation guide
 - [ ] Test with 10–20 internal users

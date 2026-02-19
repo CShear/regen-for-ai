@@ -10,7 +10,7 @@ import { retireCredits } from "./tools/retire.js";
 const server = new McpServer(
   {
     name: "regen-compute-credits",
-    version: "0.1.0",
+    version: "0.1.1",
   },
   {
     instructions: [

@@ -23,7 +23,7 @@ Read `docs/analysis.md` for the full business analysis. Key points:
 - **Data sources**:
   - Regen Ledger REST API (credit classes, projects, batches, sell orders)
   - Regen Indexer GraphQL (`api.regen.network/indexer/v1/graphql`) — retirement certificates, aggregations
-  - Regen Marketplace (`registry.regen.network`) — purchase flow links
+  - Regen Marketplace (`app.regen.network`) — purchase flow links
 
 ## Project Structure
 
