@@ -18,6 +18,11 @@ export interface Config {
   walletMnemonic: string | undefined;
   paymentProvider: "crypto" | "stripe";
   defaultJurisdiction: string;
+
+  // ecoBridge integration (Phase 1.5)
+  ecoBridgeApiUrl: string;
+  ecoBridgeEnabled: boolean;
+  ecoBridgeCacheTtlMs: number;
 }
 
 let _config: Config | undefined;
@@ -40,6 +45,14 @@ export function loadConfig(): Config {
     paymentProvider:
       (process.env.REGEN_PAYMENT_PROVIDER as "crypto" | "stripe") || "crypto",
     defaultJurisdiction: process.env.REGEN_DEFAULT_JURISDICTION || "US",
+
+    ecoBridgeApiUrl:
+      process.env.ECOBRIDGE_API_URL || "https://api.bridge.eco",
+    ecoBridgeEnabled: process.env.ECOBRIDGE_ENABLED !== "false",
+    ecoBridgeCacheTtlMs: parseInt(
+      process.env.ECOBRIDGE_CACHE_TTL_MS || "60000",
+      10
+    ),
   };
 
   return _config;
