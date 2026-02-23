@@ -57,6 +57,14 @@ function marketplaceFallback(
     `5. Credits are permanently retired — verifiable, immutable, non-reversible`,
     ``,
     `Use \`browse_available_credits\` to see current pricing and availability.`,
+    ...(loadConfig().ecoBridgeEnabled
+      ? [
+          ``,
+          `**Cross-chain option:** Use \`retire_via_ecobridge\` to pay with tokens from other chains`,
+          `(USDC, USDT, ETH, etc. on Ethereum, Polygon, Arbitrum, Base, and more).`,
+          `Use \`browse_ecobridge_tokens\` to see all supported chains and tokens.`,
+        ]
+      : []),
     ``,
     `After retiring, use \`get_retirement_certificate\` to retrieve your verifiable certificate.`
   );
