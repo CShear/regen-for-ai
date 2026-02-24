@@ -293,4 +293,77 @@ describe("MonthlyBatchRetirementExecutor", () => {
     expect(result.regenBurn?.status).toBe("failed");
     expect(result.message).toContain("REGEN burn failed");
   });
+
+  it("returns execution history with filtering, ordering, and limit", async () => {
+    await store.writeState({
+      version: 1,
+      executions: [
+        {
+          id: "batch_1",
+          month: "2026-01",
+          status: "dry_run",
+          dryRun: true,
+          reason: "Dry run Jan",
+          budgetUsdCents: 100,
+          spentMicro: "900000",
+          spentDenom: "USDC",
+          retiredQuantity: "0.450000",
+          executedAt: "2026-01-31T12:00:00.000Z",
+        },
+        {
+          id: "batch_2",
+          month: "2026-02",
+          creditType: "carbon",
+          status: "success",
+          dryRun: false,
+          reason: "Success Feb",
+          budgetUsdCents: 200,
+          spentMicro: "1800000",
+          spentDenom: "USDC",
+          retiredQuantity: "0.900000",
+          txHash: "TX_FEB",
+          executedAt: "2026-02-28T12:00:00.000Z",
+        },
+        {
+          id: "batch_3",
+          month: "2026-03",
+          creditType: "biodiversity",
+          status: "failed",
+          dryRun: false,
+          reason: "Failed Mar",
+          budgetUsdCents: 300,
+          spentMicro: "0",
+          spentDenom: "USDC",
+          retiredQuantity: "0.000000",
+          error: "rpc unavailable",
+          executedAt: "2026-03-31T12:00:00.000Z",
+        },
+      ],
+    });
+
+    const executor = createExecutor();
+
+    const filtered = await executor.getExecutionHistory({
+      month: "2026-02",
+      status: "success",
+      creditType: "carbon",
+      dryRun: false,
+      limit: 10,
+    });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.id).toBe("batch_2");
+
+    const newestTwo = await executor.getExecutionHistory({ limit: 2 });
+    expect(newestTwo.map((item) => item.id)).toEqual(["batch_3", "batch_2"]);
+
+    const oldestFirst = await executor.getExecutionHistory({
+      limit: 3,
+      newestFirst: false,
+    });
+    expect(oldestFirst.map((item) => item.id)).toEqual([
+      "batch_1",
+      "batch_2",
+      "batch_3",
+    ]);
+  });
 });

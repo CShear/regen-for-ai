@@ -122,6 +122,15 @@ export interface BatchExecutionStore {
   writeState(state: BatchExecutionState): Promise<void>;
 }
 
+export interface BatchExecutionHistoryQuery {
+  month?: string;
+  status?: BatchExecutionStatus;
+  creditType?: "carbon" | "biodiversity";
+  dryRun?: boolean;
+  limit?: number;
+  newestFirst?: boolean;
+}
+
 export interface RunMonthlyBatchInput {
   month: string;
   creditType?: "carbon" | "biodiversity";

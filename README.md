@@ -262,6 +262,17 @@ Supports all `run_monthly_batch_retirement` execution parameters plus sync contr
 
 **When it's used:** Monthly close/reconciliation where operators want deterministic “sync then run batch” execution with one tool invocation.
 
+### `get_monthly_batch_execution_history`
+
+Returns stored monthly batch execution history from the local execution ledger (`REGEN_BATCH_EXECUTIONS_PATH`) with optional filters:
+- `month` (`YYYY-MM`)
+- `status` (`success` | `failed` | `dry_run`)
+- `credit_type` (`carbon` | `biodiversity`)
+- `dry_run` (`true` / `false`)
+- `limit` (`1-200`, default `50`)
+
+**When it's used:** Operator auditing, post-run troubleshooting, and confirming prior dry-run/success/failure outcomes.
+
 ### `publish_subscriber_certificate_page`
 
 Generates a user-facing HTML certificate page for a subscriber's monthly fractional attribution record and returns:

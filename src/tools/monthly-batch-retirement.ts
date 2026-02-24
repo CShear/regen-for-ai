@@ -1,5 +1,8 @@
 import { MonthlyBatchRetirementExecutor } from "../services/batch-retirement/executor.js";
-import type { RunMonthlyBatchResult } from "../services/batch-retirement/types.js";
+import type {
+  BatchExecutionStatus,
+  RunMonthlyBatchResult,
+} from "../services/batch-retirement/types.js";
 import {
   SubscriptionPoolSyncService,
   type SubscriptionPoolSyncResult,
@@ -259,6 +262,66 @@ export async function runMonthlyBatchRetirementTool(
         {
           type: "text" as const,
           text: `Monthly batch retirement failed: ${message}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+export async function getMonthlyBatchExecutionHistoryTool(
+  month?: string,
+  status?: BatchExecutionStatus,
+  creditType?: "carbon" | "biodiversity",
+  dryRun?: boolean,
+  limit?: number
+) {
+  try {
+    const records = await executor.getExecutionHistory({
+      month,
+      status,
+      creditType,
+      dryRun,
+      limit,
+      newestFirst: true,
+    });
+
+    const lines: string[] = [
+      "## Monthly Batch Execution History",
+      "",
+      "| Filter | Value |",
+      "|--------|-------|",
+      `| Month | ${month || "all"} |`,
+      `| Status | ${status || "all"} |`,
+      `| Credit Type | ${creditType || "all"} |`,
+      `| Dry Run | ${typeof dryRun === "boolean" ? String(dryRun) : "all"} |`,
+      `| Returned Records | ${records.length} |`,
+    ];
+
+    if (records.length === 0) {
+      lines.push("", "No batch execution records matched the provided filters.");
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+
+    lines.push(
+      "",
+      "| Executed At | ID | Month | Status | Dry Run | Credit Type | Budget | Retired Quantity | Tx Hash |",
+      "|-------------|----|-------|--------|---------|-------------|--------|------------------|---------|",
+      ...records.map(
+        (record) =>
+          `| ${record.executedAt} | ${record.id} | ${record.month} | ${record.status} | ${record.dryRun ? "Yes" : "No"} | ${record.creditType || "all"} | ${formatUsd(record.budgetUsdCents)} | ${record.retiredQuantity} | ${record.txHash ? `\`${record.txHash}\`` : "N/A"} |`
+      )
+    );
+
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown execution history error";
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Execution history query failed: ${message}`,
         },
       ],
       isError: true,

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   runMonthlyBatch: vi.fn(),
+  getExecutionHistory: vi.fn(),
   syncPaidInvoices: vi.fn(),
 }));
 
@@ -9,6 +10,10 @@ vi.mock("../src/services/batch-retirement/executor.js", () => ({
   MonthlyBatchRetirementExecutor: class {
     runMonthlyBatch(input: unknown) {
       return mocks.runMonthlyBatch(input);
+    }
+
+    getExecutionHistory(input: unknown) {
+      return mocks.getExecutionHistory(input);
     }
   },
 }));
@@ -21,7 +26,10 @@ vi.mock("../src/services/subscription/pool-sync.js", () => ({
   },
 }));
 
-import { runMonthlyReconciliationTool } from "../src/tools/monthly-batch-retirement.js";
+import {
+  getMonthlyBatchExecutionHistoryTool,
+  runMonthlyReconciliationTool,
+} from "../src/tools/monthly-batch-retirement.js";
 
 function responseText(result: { content: Array<{ type: "text"; text: string }> }): string {
   return result.content[0]?.text ?? "";
@@ -60,6 +68,22 @@ describe("runMonthlyReconciliationTool", () => {
       plannedCostDenom: "USDC",
       message: "Dry run complete. No on-chain transaction was broadcast.",
     });
+    mocks.getExecutionHistory.mockResolvedValue([
+      {
+        id: "batch_1",
+        month: "2026-03",
+        creditType: "carbon",
+        dryRun: false,
+        status: "success",
+        reason: "Success run",
+        budgetUsdCents: 300,
+        spentMicro: "2500000",
+        spentDenom: "USDC",
+        retiredQuantity: "1.250000",
+        txHash: "TX123",
+        executedAt: "2026-03-31T12:00:00.000Z",
+      },
+    ]);
   });
 
   it("runs all-customer sync before monthly batch by default", async () => {
@@ -141,5 +165,40 @@ describe("runMonthlyReconciliationTool", () => {
       "Monthly reconciliation failed: Stripe unavailable"
     );
     expect(mocks.runMonthlyBatch).not.toHaveBeenCalled();
+  });
+
+  it("returns monthly batch execution history table", async () => {
+    const result = await getMonthlyBatchExecutionHistoryTool(
+      "2026-03",
+      "success",
+      "carbon",
+      false,
+      25
+    );
+    const text = responseText(result);
+
+    expect(mocks.getExecutionHistory).toHaveBeenCalledWith({
+      month: "2026-03",
+      status: "success",
+      creditType: "carbon",
+      dryRun: false,
+      limit: 25,
+      newestFirst: true,
+    });
+    expect(text).toContain("## Monthly Batch Execution History");
+    expect(text).toContain("| Returned Records | 1 |");
+    expect(text).toContain("| batch_1 |");
+    expect(text).toContain("| `TX123` |");
+  });
+
+  it("returns error response when monthly batch execution history query fails", async () => {
+    mocks.getExecutionHistory.mockRejectedValue(
+      new Error("month must be in YYYY-MM format")
+    );
+    const result = await getMonthlyBatchExecutionHistoryTool("03-2026");
+    expect(result.isError).toBe(true);
+    expect(responseText(result)).toContain(
+      "Execution history query failed: month must be in YYYY-MM format"
+    );
   });
 });

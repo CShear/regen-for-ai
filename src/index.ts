@@ -17,6 +17,7 @@ import {
   recordPoolContributionTool,
 } from "./tools/pool-accounting.js";
 import {
+  getMonthlyBatchExecutionHistoryTool,
   runMonthlyBatchRetirementTool,
   runMonthlyReconciliationTool,
 } from "./tools/monthly-batch-retirement.js";
@@ -122,11 +123,12 @@ const server = new McpServer(
       "8. record_pool_contribution / get_pool_accounting_summary — track monthly subscription pool accounting",
       "9. run_monthly_batch_retirement — execute the monthly pooled credit retirement batch",
       "10. run_monthly_reconciliation — optional contribution sync + monthly batch in one operator workflow",
-      "11. get_subscriber_impact_dashboard / get_subscriber_attribution_certificate — user-facing fractional impact views",
-      "12. publish_subscriber_certificate_page — generate a user-facing certificate HTML page and URL",
-      "13. publish_subscriber_dashboard_page — generate a user-facing dashboard HTML page and URL",
-      "14. start_identity_auth_session / verify_identity_auth_session / get_identity_auth_session — hardened identity auth session lifecycle",
-      "15. link_identity_session / recover_identity_session — identity linking and recovery flows",
+      "11. get_monthly_batch_execution_history — query stored monthly batch run history with filters",
+      "12. get_subscriber_impact_dashboard / get_subscriber_attribution_certificate — user-facing fractional impact views",
+      "13. publish_subscriber_certificate_page — generate a user-facing certificate HTML page and URL",
+      "14. publish_subscriber_dashboard_page — generate a user-facing dashboard HTML page and URL",
+      "15. start_identity_auth_session / verify_identity_auth_session / get_identity_auth_session — hardened identity auth session lifecycle",
+      "16. link_identity_session / recover_identity_session — identity linking and recovery flows",
       "",
       ...(walletMode
         ? [
@@ -141,6 +143,7 @@ const server = new McpServer(
       "Pool accounting tools support per-user contribution tracking and monthly aggregation summaries.",
       "Monthly batch retirement uses pool accounting totals to execute one on-chain retirement per month.",
       "The run_monthly_reconciliation tool orchestrates contribution sync and monthly batch execution in one call.",
+      "The get_monthly_batch_execution_history tool returns persisted batch run history for operator auditing and troubleshooting.",
       "Subscriber dashboard tools expose fractional attribution and impact history per user.",
       "Certificate frontend tool publishes shareable subscriber certificate pages to a configurable URL/path.",
       "Dashboard frontend tool publishes shareable subscriber impact dashboard pages to a configurable URL/path.",
@@ -647,6 +650,50 @@ server.tool(
       invoiceLimit: invoice_limit,
       invoiceMaxPages: invoice_max_pages,
     });
+  }
+);
+
+// Tool: Query stored monthly batch execution history
+server.tool(
+  "get_monthly_batch_execution_history",
+  "Returns persisted monthly batch execution history records with optional filters for month, status, credit type, dry-run mode, and result count limit.",
+  {
+    month: z
+      .string()
+      .optional()
+      .describe("Optional month filter in YYYY-MM format"),
+    status: z
+      .enum(["success", "failed", "dry_run"])
+      .optional()
+      .describe("Optional execution status filter"),
+    credit_type: z
+      .enum(["carbon", "biodiversity"])
+      .optional()
+      .describe("Optional credit type filter"),
+    dry_run: z
+      .boolean()
+      .optional()
+      .describe("Optional dry-run mode filter"),
+    limit: z
+      .number()
+      .int()
+      .optional()
+      .describe("Max records to return (1-200, default 50)"),
+  },
+  {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  async ({ month, status, credit_type, dry_run, limit }) => {
+    return getMonthlyBatchExecutionHistoryTool(
+      month,
+      status,
+      credit_type,
+      dry_run,
+      limit
+    );
   }
 );
 

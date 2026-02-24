@@ -18,6 +18,7 @@ import {
 import { JsonFileBatchExecutionStore } from "./store.js";
 import type {
   BatchCreditMixPolicy,
+  BatchExecutionHistoryQuery,
   BatchExecutionRecord,
   BatchExecutionStore,
   BudgetOrderSelection,
@@ -149,6 +150,38 @@ export class MonthlyBatchRetirementExecutor {
     state.executions.push(record);
     state.executions.sort((a, b) => a.executedAt.localeCompare(b.executedAt));
     await this.deps.executionStore.writeState(state);
+  }
+
+  async getExecutionHistory(
+    query: BatchExecutionHistoryQuery = {}
+  ): Promise<BatchExecutionRecord[]> {
+    if (query.month && !MONTH_REGEX.test(query.month)) {
+      throw new Error("month must be in YYYY-MM format");
+    }
+
+    const state = await this.deps.executionStore.readState();
+    const filtered = state.executions.filter((item) => {
+      if (query.month && item.month !== query.month) return false;
+      if (query.status && item.status !== query.status) return false;
+      if (query.creditType && item.creditType !== query.creditType) return false;
+      if (typeof query.dryRun === "boolean" && item.dryRun !== query.dryRun) {
+        return false;
+      }
+      return true;
+    });
+
+    const newestFirst = query.newestFirst !== false;
+    filtered.sort((a, b) =>
+      newestFirst
+        ? b.executedAt.localeCompare(a.executedAt)
+        : a.executedAt.localeCompare(b.executedAt)
+    );
+
+    const limit =
+      typeof query.limit === "number" && Number.isInteger(query.limit)
+        ? Math.min(200, Math.max(1, query.limit))
+        : 50;
+    return filtered.slice(0, limit);
   }
 
   async runMonthlyBatch(input: RunMonthlyBatchInput): Promise<RunMonthlyBatchResult> {
