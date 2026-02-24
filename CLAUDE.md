@@ -24,6 +24,7 @@ Read `docs/analysis.md` for the full business analysis. Key points:
   - Regen Ledger REST API (credit classes, projects, batches, sell orders)
   - Regen Indexer GraphQL (`api.regen.network/indexer/v1/graphql`) — retirement certificates, aggregations
   - Regen Marketplace (`app.regen.network`) — purchase flow links
+  - ecoBridge API (`api.bridge.eco`) — cross-chain token support, real-time prices, widget deep links
 
 ## Project Structure
 
@@ -43,6 +44,7 @@ src/
 │   ├── estimator.ts      # Footprint estimation heuristics
 │   ├── wallet.ts         # Cosmos wallet init, sign+broadcast (singleton)
 │   ├── order-selector.ts # Best-price sell order routing (cheapest-first greedy fill)
+│   ├── ecobridge.ts      # ecoBridge API client (registry, tokens, chains, widget URLs)
 │   └── payment/
 │       ├── types.ts      # PaymentProvider interface (authorize → capture two-phase)
 │       ├── crypto.ts     # CryptoPaymentProvider (balance check, no-op capture)
@@ -51,16 +53,17 @@ src/
 
 ## MCP Features
 
-- **Server instructions**: Detailed guidance for when/why to use this server, injected into model system prompt. Adapts based on wallet configuration.
+- **Server instructions**: Detailed guidance for when/why to use this server, injected into model system prompt. Adapts based on wallet configuration and ecoBridge enabled state.
 - **Tool annotations**: Read-only tools stay `readOnlyHint: true`. `retire_credits` becomes `destructiveHint: true` when wallet is configured (executes real transactions).
-- **Prompt templates**: `offset_my_session` (footprint → browse → retire workflow), `show_regen_impact` (network stats)
+- **Prompt templates**: `offset_my_session` (footprint → browse → retire workflow), `show_regen_impact` (network stats), `retire_with_any_token` (ecoBridge cross-chain workflow)
 - **Live data**: Marketplace snapshot computed from real sell orders, not hardcoded
 - **Two-mode retirement**: `retire_credits` executes on-chain when `REGEN_WALLET_MNEMONIC` is set, otherwise returns marketplace link (fully backward compatible)
+- **ecoBridge integration**: `browse_ecobridge_tokens` and `retire_via_ecobridge` tools enable payment with 50+ tokens across 10+ blockchains; conditionally registered based on `ECOBRIDGE_ENABLED`
 
 ## Build Phases
 
 - **Phase 1** (complete): Read-only MCP server. Footprint estimation, credit browsing, certificate retrieval, marketplace purchase links.
-- **Phase 1.5** (current): Direct on-chain retirement. Wallet signing, best-price order routing, `MsgBuyDirect` with auto-retire, `PaymentProvider` interface for Stripe.
+- **Phase 1.5** (current): Direct on-chain retirement. Wallet signing, best-price order routing, `MsgBuyDirect` with auto-retire, `PaymentProvider` interface for Stripe. ecoBridge integration for cross-chain payment (USDC, ETH, etc. on Ethereum, Polygon, Arbitrum, Base, Celo, Optimism, Solana, and more).
 - **Phase 2**: Stripe subscription pool. Monthly batch retirements with fractional attribution.
 - **Phase 3**: CosmWasm smart contract for on-chain pool aggregation and REGEN burn.
 - **Phase 4**: Enterprise API, platform partnerships, credit supply development.
@@ -85,6 +88,18 @@ src/
 - Default LCD endpoint: `lcd-regen.keplr.app` (stavr.tech was unreliable)
 - Indexer GraphQL supports `condition` arg (not `filter`) for field-level queries
 - `txByHash` returns null — use `allRetirements(condition: { txHash: ... })` instead
+
+## ecoBridge API Notes
+
+- Base URL: `https://api.bridge.eco` (configurable via `ECOBRIDGE_API_URL`)
+- Docs: https://docs.bridge.eco/docs/guides/integration/
+- Registry: `GET /registry` — all active projects, supported tokens with USD prices, chain/token details
+- Version: `GET /registry/version` — lightweight poll; returns `{ version, lastUpdated }` for cache invalidation
+- OpenAPI spec: `GET /openapi.json`
+- Widget deep-linking: https://docs.bridge.eco/docs/guides/deep-linking/ — query params: `chain`, `token`, `project`, `amount`, `beneficiary`, `reason`, `jurisdiction`
+- Prices updated ~every 60 seconds via CoinGecko Pro; registry is cached with `ECOBRIDGE_CACHE_TTL_MS` (default 60000ms)
+- Integration enabled/disabled via `ECOBRIDGE_ENABLED` env var; tools are conditionally registered when enabled
+- Supported chains include: Ethereum, Polygon, Arbitrum, Base, Optimism, Celo, Solana, World Chain, Unichain, Ink, Sonic, 0G, and more
 
 ## Tech Stack (Phase 1.5 additions)
 

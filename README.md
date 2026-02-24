@@ -42,6 +42,7 @@ Regen Compute Credits MCP Server
     ├── Browses available credits on Regen Marketplace
     ├── Retires credits directly on-chain (with wallet)
     │   OR links to credit card purchase (without wallet)
+    │   OR bridges any token via ecoBridge (USDC, ETH, etc.)
     └── Returns verifiable retirement certificate
             │
             ▼
@@ -160,6 +161,8 @@ Retires ecocredits on Regen Network. Operates in two modes:
 - **With wallet configured** (`REGEN_WALLET_MNEMONIC` set): Executes a `MsgBuyDirect` on-chain, purchasing and retiring credits in a single transaction. Returns a retirement certificate.
 - **Without wallet**: Returns a marketplace link for credit card purchase (no crypto wallet needed).
 
+When `ECOBRIDGE_ENABLED=true`, the fallback message also suggests `retire_via_ecobridge` as a cross-chain payment alternative.
+
 **Parameters:**
 
 | Parameter | Description |
@@ -171,6 +174,79 @@ Retires ecocredits on Regen Network. Operates in two modes:
 | `reason` | Reason for retiring credits (recorded on-chain). Optional. |
 
 **When it's used:** The user wants to take action and actually fund ecological regeneration.
+
+### `browse_ecobridge_tokens`
+
+Lists all tokens and chains supported by ecoBridge for cross-chain credit retirement payments.
+
+**When it's used:** The user wants to pay for credit retirement using tokens from other chains (USDC on Ethereum, ETH on Arbitrum, etc.) rather than native REGEN tokens.
+
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `chain` | Filter by chain name (e.g., 'ethereum', 'polygon'). Optional. |
+
+**Example output:**
+```
+## ecoBridge Supported Tokens
+
+### Ethereum
+| Token | Symbol | Price (USD) |
+|-------|--------|------------|
+| USD Coin | USDC | $1.00 |
+| Tether | USDT | $1.00 |
+| Ether | ETH | $3,200.00 |
+
+### Polygon
+| Token | Symbol | Price (USD) |
+|-------|--------|------------|
+| USD Coin | USDC | $1.00 |
+| MATIC | MATIC | $0.75 |
+```
+
+### `retire_via_ecobridge`
+
+Generates an ecoBridge payment link to retire ecocredits using any supported token on any supported chain.
+
+**When it's used:** The user wants to pay with tokens like USDC, USDT, ETH on Ethereum, Polygon, Arbitrum, Base, or other chains instead of native REGEN tokens.
+
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `chain` | The blockchain to pay from (e.g., 'ethereum', 'polygon', 'arbitrum', 'base'). Required. |
+| `token` | The token to pay with (e.g., 'USDC', 'USDT', 'ETH'). Required. |
+| `credit_class` | Credit class to retire (e.g., 'C01', 'BT01'). Optional. |
+| `quantity` | Number of credits to retire. Optional (defaults to 1). |
+| `beneficiary_name` | Name for the retirement certificate. Optional. |
+| `jurisdiction` | Retirement jurisdiction (ISO 3166-1). Optional. |
+| `reason` | Reason for retiring credits. Optional. |
+
+**Example output:**
+```
+## Retire Ecocredits via ecoBridge
+
+Pay with **USDC** on **Ethereum** to retire ecocredits on Regen Network.
+
+| Field | Value |
+|-------|-------|
+| Chain | Ethereum |
+| Token | USDC |
+| Quantity | 1 credit |
+| Token Price | $1.00 USD |
+
+### Payment Link
+
+**[Open ecoBridge Widget](https://app.bridge.eco?chain=ethereum&token=USDC&amount=1)**
+
+**How it works:**
+1. Click the link above to open the ecoBridge payment widget
+2. Connect your wallet on Ethereum
+3. The widget will pre-select USDC and the credit retirement details
+4. Confirm the transaction — ecoBridge bridges your tokens and retires credits on Regen Network
+5. You'll receive a verifiable on-chain retirement certificate
+```
 
 ## Direct On-Chain Retirement
 
@@ -191,6 +267,21 @@ export REGEN_RPC_URL=https://mainnet.regen.network:26657
 export REGEN_CHAIN_ID=regen-1
 ```
 
+## Cross-Chain Payment via ecoBridge
+
+To pay for credit retirements using USDC, ETH, or other tokens on Ethereum, Polygon, Arbitrum, Base, Celo, Optimism, Solana, and more, use the ecoBridge tools:
+
+```bash
+# ecoBridge is enabled by default. To disable:
+export ECOBRIDGE_ENABLED=false
+
+# Optional: custom API URL or cache TTL
+export ECOBRIDGE_API_URL=https://api.bridge.eco
+export ECOBRIDGE_CACHE_TTL_MS=60000
+```
+
+Use `browse_ecobridge_tokens` to see all available tokens and chains, then `retire_via_ecobridge` to generate a payment link.
+
 See `.env.example` for all configuration options.
 
 ## MCP Prompts
@@ -201,12 +292,13 @@ The server also provides prompt templates for common workflows:
 |--------|-------------|
 | `offset_my_session` | Estimate footprint + browse credits + get retirement link |
 | `show_regen_impact` | Pull live network stats and summarize ecological impact |
+| `retire_with_any_token` | Browse ecoBridge tokens + select chain/token + generate payment link |
 
 ## Key Concepts
 
 - **Regenerative contribution, not carbon offset.** We fund verified ecological regeneration. We do not claim carbon neutrality.
 - **On-chain and immutable.** Every retirement is recorded on Regen Ledger — verifiable, non-reversible.
-- **Two modes:** With a wallet, credits are retired directly on-chain. Without a wallet, purchase via credit card on Regen Marketplace.
+- **Three payment modes:** (1) Direct on-chain with a REGEN wallet, (2) credit card via Regen Marketplace, or (3) any token on any chain via ecoBridge (USDC, ETH, etc. on Ethereum, Polygon, Arbitrum, Base, and more).
 - **Multiple credit types.** Carbon, biodiversity, marine, soil, and species stewardship credits.
 - **Graceful fallback.** If direct retirement fails for any reason, a marketplace link is returned instead.
 
@@ -217,6 +309,7 @@ The server also provides prompt templates for common workflows:
 | [Regen Ledger REST](https://lcd-regen.keplr.app) | Credit classes, projects, batches, sell orders |
 | [Regen Indexer GraphQL](https://api.regen.network/indexer/v1/graphql) | Retirement certificates, marketplace orders, aggregate stats |
 | [Regen Marketplace](https://app.regen.network) | Credit card purchase flow, project pages |
+| [ecoBridge API](https://api.bridge.eco) | Cross-chain token support, real-time USD prices, widget deep links |
 
 ## Development
 
@@ -235,7 +328,7 @@ npm run typecheck # Type checking
 | Phase | Description | Status |
 |-------|-------------|--------|
 | **Phase 1** | MCP server — footprint estimation, credit browsing, marketplace links, certificates | Complete |
-| **Phase 1.5** | Direct on-chain retirement — wallet signing, best-price order routing, payment provider interface | Complete |
+| **Phase 1.5** | Direct on-chain retirement — wallet signing, best-price order routing, payment provider interface; ecoBridge cross-chain payment integration | Complete |
 | **Phase 2** | Subscription pool — Stripe, monthly batch retirements, fractional attribution | Planned |
 | **Phase 3** | CosmWasm pool contract — on-chain aggregation, automated retirement, REGEN burn | Planned |
 | **Phase 4** | Scale — enterprise API, platform partnerships, credit supply development | Planned |
