@@ -18,6 +18,15 @@ class InMemoryBatchExecutionStore implements BatchExecutionStore {
   async writeState(state: BatchExecutionState): Promise<void> {
     this.state = JSON.parse(JSON.stringify(state)) as BatchExecutionState;
   }
+
+  async withExclusiveState<T>(
+    updater: (state: BatchExecutionState) => T | Promise<T>
+  ): Promise<T> {
+    const state = await this.readState();
+    const result = await updater(state);
+    await this.writeState(state);
+    return result;
+  }
 }
 
 describe("MonthlyBatchRetirementExecutor", () => {

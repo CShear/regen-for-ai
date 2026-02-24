@@ -192,4 +192,31 @@ describe("PoolAccountingService", () => {
     expect(march.contributionCount).toBe(1);
     expect(march.totalUsdCents).toBe(300);
   });
+
+  it("deduplicates concurrent records when externalEventId collides", async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), "pool-accounting-concurrent-"));
+    const ledgerPath = path.join(tempDir, "ledger.json");
+    const concurrentService = new PoolAccountingService(
+      new JsonFilePoolAccountingStore(ledgerPath)
+    );
+
+    const receipts = await Promise.all(
+      Array.from({ length: 10 }, () =>
+        concurrentService.recordContribution({
+          customerId: "cus_concurrent",
+          amountUsdCents: 300,
+          contributedAt: "2026-03-10T00:00:00.000Z",
+          externalEventId: "stripe_invoice:in_concurrent",
+          source: "subscription",
+        })
+      )
+    );
+
+    expect(receipts.filter((item) => item.duplicate)).toHaveLength(9);
+    expect(new Set(receipts.map((item) => item.record.id)).size).toBe(1);
+
+    const march = await concurrentService.getMonthlySummary("2026-03");
+    expect(march.contributionCount).toBe(1);
+    expect(march.totalUsdCents).toBe(300);
+  });
 });

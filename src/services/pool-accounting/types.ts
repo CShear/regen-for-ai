@@ -79,6 +79,9 @@ export interface PoolAccountingState {
 export interface PoolAccountingStore {
   readState(): Promise<PoolAccountingState>;
   writeState(state: PoolAccountingState): Promise<void>;
+  withExclusiveState?<T>(
+    updater: (state: PoolAccountingState) => T | Promise<T>
+  ): Promise<T>;
 }
 
 export interface ContributionReceipt {

@@ -490,8 +490,16 @@ export STRIPE_PRICE_ID_GROWTH=price_...
 export STRIPE_PRICE_ID_IMPACT=price_...
 # optional custom ledger path for pool accounting service
 export REGEN_POOL_ACCOUNTING_PATH=./data/pool-accounting-ledger.json
+# optional pool accounting store lock tuning
+export REGEN_POOL_ACCOUNTING_LOCK_WAIT_MS=10000
+export REGEN_POOL_ACCOUNTING_LOCK_RETRY_MS=25
+export REGEN_POOL_ACCOUNTING_LOCK_STALE_MS=60000
 # optional custom history path for monthly batch executions
 export REGEN_BATCH_EXECUTIONS_PATH=./data/monthly-batch-executions.json
+# optional batch execution store lock tuning
+export REGEN_BATCH_EXECUTIONS_LOCK_WAIT_MS=10000
+export REGEN_BATCH_EXECUTIONS_LOCK_RETRY_MS=25
+export REGEN_BATCH_EXECUTIONS_LOCK_STALE_MS=60000
 # optional custom history path for monthly reconciliation orchestration runs
 export REGEN_RECONCILIATION_RUNS_PATH=./data/monthly-reconciliation-runs.json
 # optional lock directory for reconciliation single-flight protection

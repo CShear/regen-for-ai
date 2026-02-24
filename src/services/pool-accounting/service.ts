@@ -8,6 +8,7 @@ import type {
   ContributionReceipt,
   ContributionRecord,
   MonthlyPoolSummary,
+  PoolAccountingState,
   PoolAccountingStore,
   UserContributionSummary,
 } from "./types.js";
@@ -197,62 +198,75 @@ export class PoolAccountingService {
     private readonly store: PoolAccountingStore = new JsonFilePoolAccountingStore()
   ) {}
 
-  async recordContribution(input: ContributionInput): Promise<ContributionReceipt> {
-    const state = await this.store.readState();
-    const externalEventId = normalize(input.externalEventId);
-
-    if (externalEventId) {
-      const existing = state.contributions.find(
-        (item) => item.externalEventId === externalEventId
-      );
-      if (existing) {
-        const userRecords = state.contributions.filter(
-          (item) => item.userId === existing.userId
-        );
-        return {
-          record: existing,
-          duplicate: true,
-          userSummary: summarizeUserRecords(existing.userId, userRecords),
-          monthSummary: summarizeMonth(existing.month, state.contributions),
-        };
-      }
+  private async mutateState<T>(
+    updater: (state: PoolAccountingState) => T | Promise<T>
+  ): Promise<T> {
+    if (this.store.withExclusiveState) {
+      return this.store.withExclusiveState(updater);
     }
 
-    const userId = resolveUserId(input);
-    const contributedAt = toIsoTimestamp(input.contributedAt);
-    const month = toMonth(contributedAt);
-    const amountUsdCents = resolveAmountUsdCents(input);
-
-    const record: ContributionRecord = {
-      id: `contrib_${randomUUID()}`,
-      userId,
-      email: normalizeEmail(input.email),
-      customerId: normalize(input.customerId),
-      subscriptionId: normalize(input.subscriptionId),
-      externalEventId,
-      tierId: input.tierId,
-      amountUsdCents,
-      contributedAt,
-      month,
-      source: input.source || "subscription",
-      metadata: input.metadata && Object.keys(input.metadata).length > 0
-        ? input.metadata
-        : undefined,
-    };
-
-    state.contributions.push(record);
-    state.contributions.sort((a, b) =>
-      a.contributedAt.localeCompare(b.contributedAt)
-    );
+    const state = await this.store.readState();
+    const result = await updater(state);
     await this.store.writeState(state);
+    return result;
+  }
 
-    const userRecords = state.contributions.filter((item) => item.userId === userId);
-    return {
-      record,
-      duplicate: false,
-      userSummary: summarizeUserRecords(userId, userRecords),
-      monthSummary: summarizeMonth(month, state.contributions),
-    };
+  async recordContribution(input: ContributionInput): Promise<ContributionReceipt> {
+    return this.mutateState((state) => {
+      const externalEventId = normalize(input.externalEventId);
+
+      if (externalEventId) {
+        const existing = state.contributions.find(
+          (item) => item.externalEventId === externalEventId
+        );
+        if (existing) {
+          const userRecords = state.contributions.filter(
+            (item) => item.userId === existing.userId
+          );
+          return {
+            record: existing,
+            duplicate: true,
+            userSummary: summarizeUserRecords(existing.userId, userRecords),
+            monthSummary: summarizeMonth(existing.month, state.contributions),
+          };
+        }
+      }
+
+      const userId = resolveUserId(input);
+      const contributedAt = toIsoTimestamp(input.contributedAt);
+      const month = toMonth(contributedAt);
+      const amountUsdCents = resolveAmountUsdCents(input);
+
+      const record: ContributionRecord = {
+        id: `contrib_${randomUUID()}`,
+        userId,
+        email: normalizeEmail(input.email),
+        customerId: normalize(input.customerId),
+        subscriptionId: normalize(input.subscriptionId),
+        externalEventId,
+        tierId: input.tierId,
+        amountUsdCents,
+        contributedAt,
+        month,
+        source: input.source || "subscription",
+        metadata: input.metadata && Object.keys(input.metadata).length > 0
+          ? input.metadata
+          : undefined,
+      };
+
+      state.contributions.push(record);
+      state.contributions.sort((a, b) =>
+        a.contributedAt.localeCompare(b.contributedAt)
+      );
+
+      const userRecords = state.contributions.filter((item) => item.userId === userId);
+      return {
+        record,
+        duplicate: false,
+        userSummary: summarizeUserRecords(userId, userRecords),
+        monthSummary: summarizeMonth(month, state.contributions),
+      };
+    });
   }
 
   async getUserSummary(

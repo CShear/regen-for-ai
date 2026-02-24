@@ -20,6 +20,7 @@ import type {
   BatchCreditMixPolicy,
   BatchExecutionHistoryQuery,
   BatchExecutionRecord,
+  BatchExecutionState,
   BatchExecutionStore,
   BudgetOrderSelection,
   RunMonthlyBatchInput,
@@ -132,6 +133,19 @@ export class MonthlyBatchRetirementExecutor {
     };
   }
 
+  private async mutateExecutionState<T>(
+    updater: (state: BatchExecutionState) => T | Promise<T>
+  ): Promise<T> {
+    if (this.deps.executionStore.withExclusiveState) {
+      return this.deps.executionStore.withExclusiveState(updater);
+    }
+
+    const state = await this.deps.executionStore.readState();
+    const result = await updater(state);
+    await this.deps.executionStore.writeState(state);
+    return result;
+  }
+
   private async hasSuccessfulExecution(
     month: string,
     creditType?: "carbon" | "biodiversity"
@@ -146,10 +160,10 @@ export class MonthlyBatchRetirementExecutor {
   }
 
   private async appendExecution(record: BatchExecutionRecord): Promise<void> {
-    const state = await this.deps.executionStore.readState();
-    state.executions.push(record);
-    state.executions.sort((a, b) => a.executedAt.localeCompare(b.executedAt));
-    await this.deps.executionStore.writeState(state);
+    await this.mutateExecutionState((state) => {
+      state.executions.push(record);
+      state.executions.sort((a, b) => a.executedAt.localeCompare(b.executedAt));
+    });
   }
 
   async getExecutionHistory(

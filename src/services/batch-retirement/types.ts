@@ -120,6 +120,9 @@ export interface BatchExecutionState {
 export interface BatchExecutionStore {
   readState(): Promise<BatchExecutionState>;
   writeState(state: BatchExecutionState): Promise<void>;
+  withExclusiveState?<T>(
+    updater: (state: BatchExecutionState) => T | Promise<T>
+  ): Promise<T>;
 }
 
 export interface BatchExecutionHistoryQuery {
