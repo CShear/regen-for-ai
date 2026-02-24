@@ -18,6 +18,7 @@ export interface Config {
   walletMnemonic: string | undefined;
   paymentProvider: "crypto" | "stripe";
   defaultJurisdiction: string;
+  protocolFeeBps: number;
 
   // ecoBridge integration (Phase 1.5)
   ecoBridgeApiUrl: string;
@@ -30,6 +31,27 @@ export interface Config {
 }
 
 let _config: Config | undefined;
+
+const DEFAULT_PROTOCOL_FEE_BPS = 1000;
+const MIN_PROTOCOL_FEE_BPS = 800;
+const MAX_PROTOCOL_FEE_BPS = 1200;
+
+function parseProtocolFeeBps(rawValue: string | undefined): number {
+  if (!rawValue) return DEFAULT_PROTOCOL_FEE_BPS;
+
+  const parsed = Number(rawValue);
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < MIN_PROTOCOL_FEE_BPS ||
+    parsed > MAX_PROTOCOL_FEE_BPS
+  ) {
+    throw new Error(
+      `REGEN_PROTOCOL_FEE_BPS must be an integer between ${MIN_PROTOCOL_FEE_BPS} and ${MAX_PROTOCOL_FEE_BPS}`
+    );
+  }
+
+  return parsed;
+}
 
 export function loadConfig(): Config {
   if (_config) return _config;
@@ -49,6 +71,7 @@ export function loadConfig(): Config {
     paymentProvider:
       (process.env.REGEN_PAYMENT_PROVIDER as "crypto" | "stripe") || "crypto",
     defaultJurisdiction: process.env.REGEN_DEFAULT_JURISDICTION || "US",
+    protocolFeeBps: parseProtocolFeeBps(process.env.REGEN_PROTOCOL_FEE_BPS),
 
     ecoBridgeApiUrl:
       process.env.ECOBRIDGE_API_URL || "https://api.bridge.eco",

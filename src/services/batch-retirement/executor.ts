@@ -4,6 +4,7 @@ import { waitForRetirement } from "../indexer.js";
 import { signAndBroadcast, initWallet } from "../wallet.js";
 import { PoolAccountingService } from "../pool-accounting/service.js";
 import { buildContributorAttributions } from "./attribution.js";
+import { calculateProtocolFee } from "./fee.js";
 import { selectOrdersForBudget } from "./planner.js";
 import { JsonFileBatchExecutionStore } from "./store.js";
 import type {
@@ -50,6 +51,7 @@ function buildExecutionRecord(
     reason: string;
     budgetUsdCents: number;
     selection: BudgetOrderSelection;
+    protocolFee?: BatchExecutionRecord["protocolFee"];
     attributions?: BatchExecutionRecord["attributions"];
     txHash?: string;
     blockHeight?: number;
@@ -69,6 +71,7 @@ function buildExecutionRecord(
     spentMicro: input.selection.totalCostMicro.toString(),
     spentDenom: input.selection.paymentDenom,
     retiredQuantity: input.selection.totalQuantity,
+    protocolFee: input.protocolFee,
     attributions: input.attributions,
     txHash: input.txHash,
     blockHeight: input.blockHeight,
@@ -159,8 +162,29 @@ export class MonthlyBatchRetirementExecutor {
       ? Math.min(monthlySummary.totalUsdCents, usdToCents(input.maxBudgetUsd))
       : monthlySummary.totalUsdCents;
 
+    const config = this.deps.loadConfig();
     const paymentDenom = input.paymentDenom || "USDC";
-    const budgetMicro = toBudgetMicro(paymentDenom, totalBudgetUsdCents);
+    const protocolFee = calculateProtocolFee({
+      grossBudgetUsdCents: totalBudgetUsdCents,
+      protocolFeeBps: config.protocolFeeBps,
+      paymentDenom,
+    });
+    const budgetMicro = toBudgetMicro(paymentDenom, protocolFee.creditBudgetUsdCents);
+
+    if (protocolFee.creditBudgetUsdCents <= 0) {
+      return {
+        status: "no_orders",
+        month: input.month,
+        creditType: input.creditType,
+        budgetUsdCents: totalBudgetUsdCents,
+        plannedQuantity: "0.000000",
+        plannedCostMicro: 0n,
+        plannedCostDenom: paymentDenom,
+        protocolFee,
+        message:
+          "No credit purchase budget remains after applying protocol fee to this monthly pool.",
+      };
+    }
 
     const selection = await this.deps.selectOrdersForBudget(
       input.creditType,
@@ -177,6 +201,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedQuantity: selection.totalQuantity,
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
+        protocolFee,
         message:
           "No eligible sell orders were found for the configured budget and filters.",
       };
@@ -185,13 +210,12 @@ export class MonthlyBatchRetirementExecutor {
     const attributions = buildContributorAttributions({
       contributors: monthlySummary.contributors,
       totalContributionUsdCents: monthlySummary.totalUsdCents,
-      appliedBudgetUsdCents: totalBudgetUsdCents,
+      appliedBudgetUsdCents: protocolFee.creditBudgetUsdCents,
       totalCostMicro: selection.totalCostMicro,
       retiredQuantity: selection.totalQuantity,
       paymentDenom: selection.paymentDenom,
     });
 
-    const config = this.deps.loadConfig();
     const retireJurisdiction = input.jurisdiction || config.defaultJurisdiction;
     const retireReason =
       input.reason || `Monthly subscription pool retirement (${input.month})`;
@@ -203,6 +227,7 @@ export class MonthlyBatchRetirementExecutor {
         reason: retireReason,
         budgetUsdCents: totalBudgetUsdCents,
         selection,
+        protocolFee,
         attributions,
         dryRun: true,
       });
@@ -215,6 +240,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedQuantity: selection.totalQuantity,
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
+        protocolFee,
         attributions,
         message: "Dry run complete. No on-chain transaction was broadcast.",
         executionRecord: record,
@@ -230,6 +256,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedQuantity: selection.totalQuantity,
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
+        protocolFee,
         attributions,
         message:
           "Wallet is not configured. Set REGEN_WALLET_MNEMONIC before executing monthly batch retirements.",
@@ -267,6 +294,7 @@ export class MonthlyBatchRetirementExecutor {
           reason: retireReason,
           budgetUsdCents: totalBudgetUsdCents,
           selection,
+          protocolFee,
           attributions,
           error: `Transaction rejected (code ${txResult.code}): ${
             txResult.rawLog || "unknown error"
@@ -283,6 +311,7 @@ export class MonthlyBatchRetirementExecutor {
           plannedQuantity: selection.totalQuantity,
           plannedCostMicro: selection.totalCostMicro,
           plannedCostDenom: selection.paymentDenom,
+          protocolFee,
           attributions,
           message: record.error || "Monthly batch transaction failed.",
           executionRecord: record,
@@ -296,6 +325,7 @@ export class MonthlyBatchRetirementExecutor {
         reason: retireReason,
         budgetUsdCents: totalBudgetUsdCents,
         selection,
+        protocolFee,
         attributions,
         txHash: txResult.transactionHash,
         blockHeight: txResult.height,
@@ -312,6 +342,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedQuantity: selection.totalQuantity,
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
+        protocolFee,
         attributions,
         txHash: txResult.transactionHash,
         blockHeight: txResult.height,
@@ -328,6 +359,7 @@ export class MonthlyBatchRetirementExecutor {
         reason: retireReason,
         budgetUsdCents: totalBudgetUsdCents,
         selection,
+        protocolFee,
         attributions,
         error: errMsg,
         dryRun: false,
@@ -342,6 +374,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedQuantity: selection.totalQuantity,
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
+        protocolFee,
         attributions,
         message: errMsg,
         executionRecord: record,

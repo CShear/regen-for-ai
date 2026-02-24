@@ -86,6 +86,7 @@ describe("MonthlyBatchRetirementExecutor", () => {
       loadConfig: () =>
         ({
           defaultJurisdiction: "US",
+          protocolFeeBps: 1000,
         }) as any,
     });
   }
@@ -115,20 +116,28 @@ describe("MonthlyBatchRetirementExecutor", () => {
     expect(result.status).toBe("dry_run");
     expect(selectOrdersForBudget).toHaveBeenCalledWith(
       undefined,
-      3_000_000n,
+      2_700_000n,
       "USDC"
     );
     expect(signAndBroadcast).not.toHaveBeenCalled();
+    expect(result.protocolFee).toMatchObject({
+      protocolFeeBps: 1000,
+      grossBudgetUsdCents: 300,
+      protocolFeeUsdCents: 30,
+      creditBudgetUsdCents: 270,
+      protocolFeeDenom: "USDC",
+    });
     expect(result.attributions).toHaveLength(1);
     expect(result.attributions?.[0]).toMatchObject({
       userId: "user-a",
-      attributedBudgetUsdCents: 300,
+      attributedBudgetUsdCents: 270,
       attributedQuantity: "1.250000",
     });
 
     const state = await store.readState();
     expect(state.executions).toHaveLength(1);
     expect(state.executions[0]?.status).toBe("dry_run");
+    expect(state.executions[0]?.protocolFee?.protocolFeeUsdCents).toBe(30);
     expect(state.executions[0]?.attributions?.[0]?.userId).toBe("user-a");
   });
 
@@ -147,6 +156,7 @@ describe("MonthlyBatchRetirementExecutor", () => {
     expect(waitForRetirement).toHaveBeenCalledWith("TX123");
     expect(result.txHash).toBe("TX123");
     expect(result.retirementId).toBe("WyRet123");
+    expect(result.protocolFee?.protocolFeeUsdCents).toBe(30);
     expect(result.attributions).toHaveLength(1);
 
     const state = await store.readState();

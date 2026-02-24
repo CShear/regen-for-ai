@@ -47,10 +47,20 @@ export async function runMonthlyBatchRetirementTool(
       `| Status | ${result.status} |`,
       `| Month | ${result.month} |`,
       `| Credit Type | ${result.creditType || "all"} |`,
-      `| Budget | ${formatUsd(result.budgetUsdCents)} |`,
+      `| Gross Budget | ${formatUsd(result.budgetUsdCents)} |`,
       `| Planned Quantity | ${result.plannedQuantity} |`,
       `| Planned Cost | ${formatMicroAmount(result.plannedCostMicro, result.plannedCostDenom, denomExponent(result.plannedCostDenom))} |`,
     ];
+
+    if (result.protocolFee) {
+      const pct = (result.protocolFee.protocolFeeBps / 100).toFixed(2);
+      lines.splice(
+        7,
+        0,
+        `| Protocol Fee | ${formatUsd(result.protocolFee.protocolFeeUsdCents)} (${pct}%) |`,
+        `| Credit Purchase Budget | ${formatUsd(result.protocolFee.creditBudgetUsdCents)} |`
+      );
+    }
 
     if (result.txHash) {
       lines.push(`| Transaction Hash | \`${result.txHash}\` |`);

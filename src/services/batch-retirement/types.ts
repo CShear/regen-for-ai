@@ -30,6 +30,15 @@ export interface ContributorAttribution {
   paymentDenom: string;
 }
 
+export interface ProtocolFeeBreakdown {
+  protocolFeeBps: number;
+  grossBudgetUsdCents: number;
+  protocolFeeUsdCents: number;
+  protocolFeeMicro: string;
+  protocolFeeDenom: "USDC" | "uusdc";
+  creditBudgetUsdCents: number;
+}
+
 export type BatchExecutionStatus =
   | "success"
   | "failed"
@@ -46,6 +55,7 @@ export interface BatchExecutionRecord {
   spentMicro: string;
   spentDenom: string;
   retiredQuantity: string;
+  protocolFee?: ProtocolFeeBreakdown;
   attributions?: ContributorAttribution[];
   txHash?: string;
   blockHeight?: number;
@@ -90,6 +100,7 @@ export interface RunMonthlyBatchResult {
   plannedQuantity: string;
   plannedCostMicro: bigint;
   plannedCostDenom: string;
+  protocolFee?: ProtocolFeeBreakdown;
   attributions?: ContributorAttribution[];
   txHash?: string;
   blockHeight?: number;
