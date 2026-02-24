@@ -210,6 +210,7 @@ Supports:
 - `dry_run=true` planning (default, no on-chain transaction),
 - real execution with `dry_run=false`,
 - duplicate-run protection per month (override with `force=true`),
+- automated carbon+biodiversity mix policy when `credit_type` is omitted,
 - protocol fee allocation (configurable `8%-12%`, default `10%`) with gross/fee/net budget reporting,
 - protocol fee REGEN acquisition adapter output (planned/executed/skipped),
 - REGEN burn execution status (planned/executed/skipped/failed).
@@ -349,6 +350,8 @@ export REGEN_POOL_ACCOUNTING_PATH=./data/pool-accounting-ledger.json
 export REGEN_BATCH_EXECUTIONS_PATH=./data/monthly-batch-executions.json
 # optional protocol fee basis points for monthly pool budgets (800-1200, default 1000)
 export REGEN_PROTOCOL_FEE_BPS=1000
+# optional batch credit mix policy when credit_type is omitted: balanced | off
+export REGEN_BATCH_CREDIT_MIX_POLICY=balanced
 # optional protocol fee REGEN acquisition provider: disabled | simulated
 export REGEN_ACQUISITION_PROVIDER=disabled
 # optional simulated acquisition rate (micro-REGEN per 1 USDC, default 2000000)

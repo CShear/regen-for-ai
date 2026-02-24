@@ -30,6 +30,7 @@ export interface Config {
   ecoBridgeEvmDerivationPath: string;
   regenAcquisitionProvider: "disabled" | "simulated";
   regenAcquisitionRateUregenPerUsdc: number;
+  batchCreditMixPolicy: "off" | "balanced";
   regenBurnProvider: "disabled" | "simulated" | "onchain";
   regenBurnAddress: string | undefined;
 }
@@ -41,6 +42,7 @@ const MIN_PROTOCOL_FEE_BPS = 800;
 const MAX_PROTOCOL_FEE_BPS = 1200;
 const DEFAULT_REGEN_ACQUISITION_PROVIDER = "disabled" as const;
 const DEFAULT_REGEN_ACQUISITION_RATE_UREGEN_PER_USDC = 2_000_000;
+const DEFAULT_BATCH_CREDIT_MIX_POLICY = "balanced" as const;
 const DEFAULT_REGEN_BURN_PROVIDER = "disabled" as const;
 
 function parseProtocolFeeBps(rawValue: string | undefined): number {
@@ -104,6 +106,20 @@ function parseRegenBurnProvider(
   );
 }
 
+function parseBatchCreditMixPolicy(
+  rawValue: string | undefined
+): "off" | "balanced" {
+  if (!rawValue) return DEFAULT_BATCH_CREDIT_MIX_POLICY;
+
+  const normalized = rawValue.trim().toLowerCase();
+  if (normalized === "off") return "off";
+  if (normalized === "balanced") return "balanced";
+
+  throw new Error(
+    "REGEN_BATCH_CREDIT_MIX_POLICY must be one of: off, balanced"
+  );
+}
+
 export function loadConfig(): Config {
   if (_config) return _config;
 
@@ -142,6 +158,9 @@ export function loadConfig(): Config {
       process.env.REGEN_ACQUISITION_RATE_UREGEN_PER_USDC,
       "REGEN_ACQUISITION_RATE_UREGEN_PER_USDC",
       DEFAULT_REGEN_ACQUISITION_RATE_UREGEN_PER_USDC
+    ),
+    batchCreditMixPolicy: parseBatchCreditMixPolicy(
+      process.env.REGEN_BATCH_CREDIT_MIX_POLICY
     ),
     regenBurnProvider: parseRegenBurnProvider(process.env.REGEN_BURN_PROVIDER),
     regenBurnAddress: process.env.REGEN_BURN_ADDRESS?.trim() || undefined,

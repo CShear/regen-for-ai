@@ -67,6 +67,13 @@ export async function runMonthlyBatchRetirementTool(
       );
     }
 
+    if (result.creditMix) {
+      lines.push(
+        `| Credit Mix Policy | ${result.creditMix.policy} |`,
+        `| Credit Mix Strategy | ${result.creditMix.strategy} |`
+      );
+    }
+
     if (result.regenAcquisition) {
       lines.push(
         `| REGEN Acquisition Status | ${result.regenAcquisition.status} (${result.regenAcquisition.provider}) |`,
@@ -128,6 +135,20 @@ export async function runMonthlyBatchRetirementTool(
           `Showing 25 of ${result.attributions.length} attribution rows.`
         );
       }
+    }
+
+    if (result.creditMix) {
+      lines.push(
+        "",
+        "### Credit Mix Allocation",
+        "",
+        "| Credit Type | Budget | Spent | Quantity | Orders |",
+        "|-------------|--------|-------|----------|--------|",
+        ...result.creditMix.allocations.map(
+          (item) =>
+            `| ${item.creditType} | ${formatMicroAmount(BigInt(item.budgetMicro), result.plannedCostDenom, denomExponent(result.plannedCostDenom))} | ${formatMicroAmount(BigInt(item.spentMicro), result.plannedCostDenom, denomExponent(result.plannedCostDenom))} | ${item.selectedQuantity} | ${item.orderCount} |`
+        )
+      );
     }
 
     lines.push("", result.message);

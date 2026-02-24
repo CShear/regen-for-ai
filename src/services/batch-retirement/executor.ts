@@ -5,6 +5,7 @@ import { signAndBroadcast, initWallet } from "../wallet.js";
 import { PoolAccountingService } from "../pool-accounting/service.js";
 import { buildContributorAttributions } from "./attribution.js";
 import { calculateProtocolFee } from "./fee.js";
+import { selectOrdersWithPolicy } from "./policy.js";
 import { selectOrdersForBudget } from "./planner.js";
 import {
   createRegenAcquisitionProvider,
@@ -16,6 +17,7 @@ import {
 } from "../regen-burn/provider.js";
 import { JsonFileBatchExecutionStore } from "./store.js";
 import type {
+  BatchCreditMixPolicy,
   BatchExecutionRecord,
   BatchExecutionStore,
   BudgetOrderSelection,
@@ -61,6 +63,7 @@ function buildExecutionRecord(
     reason: string;
     budgetUsdCents: number;
     selection: BudgetOrderSelection;
+    creditMix?: BatchExecutionRecord["creditMix"];
     protocolFee?: BatchExecutionRecord["protocolFee"];
     regenAcquisition?: BatchExecutionRecord["regenAcquisition"];
     regenBurn?: BatchExecutionRecord["regenBurn"];
@@ -83,6 +86,7 @@ function buildExecutionRecord(
     spentMicro: input.selection.totalCostMicro.toString(),
     spentDenom: input.selection.paymentDenom,
     retiredQuantity: input.selection.totalQuantity,
+    creditMix: input.creditMix,
     protocolFee: input.protocolFee,
     regenAcquisition: input.regenAcquisition,
     regenBurn: input.regenBurn,
@@ -196,6 +200,9 @@ export class MonthlyBatchRetirementExecutor {
     const retireReason =
       input.reason || `Monthly subscription pool retirement (${input.month})`;
     const paymentDenom = input.paymentDenom || "USDC";
+    const mixPolicy: BatchCreditMixPolicy = input.creditType
+      ? "off"
+      : config.batchCreditMixPolicy || "balanced";
     const protocolFee = calculateProtocolFee({
       grossBudgetUsdCents: totalBudgetUsdCents,
       protocolFeeBps: config.protocolFeeBps,
@@ -247,11 +254,13 @@ export class MonthlyBatchRetirementExecutor {
       };
     }
 
-    const selection = await this.deps.selectOrdersForBudget(
-      input.creditType,
+    const { selection, creditMix } = await selectOrdersWithPolicy({
+      explicitCreditType: input.creditType,
+      policy: mixPolicy,
       budgetMicro,
-      paymentDenom
-    );
+      paymentDenom,
+      selectOrdersForBudget: this.deps.selectOrdersForBudget,
+    });
 
     if (selection.orders.length === 0) {
       return {
@@ -262,6 +271,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedQuantity: selection.totalQuantity,
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
+        creditMix,
         protocolFee,
         regenAcquisition: plannedRegenAcquisition,
         regenBurn: plannedRegenBurn,
@@ -288,6 +298,7 @@ export class MonthlyBatchRetirementExecutor {
         reason: retireReason,
         budgetUsdCents: totalBudgetUsdCents,
         selection,
+        creditMix,
         protocolFee,
         regenAcquisition: plannedRegenAcquisition,
         regenBurn: plannedRegenBurn,
@@ -303,6 +314,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedQuantity: selection.totalQuantity,
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
+        creditMix,
         protocolFee,
         regenAcquisition: plannedRegenAcquisition,
         regenBurn: plannedRegenBurn,
@@ -321,6 +333,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedQuantity: selection.totalQuantity,
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
+        creditMix,
         protocolFee,
         regenAcquisition: plannedRegenAcquisition,
         regenBurn: plannedRegenBurn,
@@ -361,6 +374,7 @@ export class MonthlyBatchRetirementExecutor {
           reason: retireReason,
           budgetUsdCents: totalBudgetUsdCents,
           selection,
+          creditMix,
           protocolFee,
           regenAcquisition: plannedRegenAcquisition
             ? {
@@ -394,6 +408,7 @@ export class MonthlyBatchRetirementExecutor {
           plannedQuantity: selection.totalQuantity,
           plannedCostMicro: selection.totalCostMicro,
           plannedCostDenom: selection.paymentDenom,
+          creditMix,
           protocolFee,
           regenAcquisition: record.regenAcquisition,
           regenBurn: record.regenBurn,
@@ -478,6 +493,7 @@ export class MonthlyBatchRetirementExecutor {
         reason: retireReason,
         budgetUsdCents: totalBudgetUsdCents,
         selection,
+        creditMix,
         protocolFee,
         regenAcquisition,
         regenBurn,
@@ -497,6 +513,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedQuantity: selection.totalQuantity,
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
+        creditMix,
         protocolFee,
         regenAcquisition,
         regenBurn,
@@ -521,6 +538,7 @@ export class MonthlyBatchRetirementExecutor {
         reason: retireReason,
         budgetUsdCents: totalBudgetUsdCents,
         selection,
+        creditMix,
         protocolFee,
         regenAcquisition: plannedRegenAcquisition
           ? {
@@ -552,6 +570,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedQuantity: selection.totalQuantity,
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
+        creditMix,
         protocolFee,
         regenAcquisition: record.regenAcquisition,
         regenBurn: record.regenBurn,

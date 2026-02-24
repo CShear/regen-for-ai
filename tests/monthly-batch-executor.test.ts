@@ -138,6 +138,7 @@ describe("MonthlyBatchRetirementExecutor", () => {
         ({
           defaultJurisdiction: "US",
           protocolFeeBps: 1000,
+          batchCreditMixPolicy: "off",
         }) as any,
     });
   }

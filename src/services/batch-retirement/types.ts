@@ -39,6 +39,22 @@ export interface ProtocolFeeBreakdown {
   creditBudgetUsdCents: number;
 }
 
+export type BatchCreditMixPolicy = "off" | "balanced";
+
+export interface CreditMixAllocation {
+  creditType: "carbon" | "biodiversity";
+  budgetMicro: string;
+  spentMicro: string;
+  selectedQuantity: string;
+  orderCount: number;
+}
+
+export interface CreditMixSummary {
+  policy: BatchCreditMixPolicy;
+  strategy: string;
+  allocations: CreditMixAllocation[];
+}
+
 export type RegenAcquisitionStatus =
   | "planned"
   | "executed"
@@ -84,6 +100,7 @@ export interface BatchExecutionRecord {
   spentMicro: string;
   spentDenom: string;
   retiredQuantity: string;
+  creditMix?: CreditMixSummary;
   protocolFee?: ProtocolFeeBreakdown;
   regenAcquisition?: RegenAcquisitionRecord;
   regenBurn?: RegenBurnRecord;
@@ -131,6 +148,7 @@ export interface RunMonthlyBatchResult {
   plannedQuantity: string;
   plannedCostMicro: bigint;
   plannedCostDenom: string;
+  creditMix?: CreditMixSummary;
   protocolFee?: ProtocolFeeBreakdown;
   regenAcquisition?: RegenAcquisitionRecord;
   regenBurn?: RegenBurnRecord;
