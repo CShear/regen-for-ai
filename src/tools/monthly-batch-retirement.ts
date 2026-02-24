@@ -18,6 +18,11 @@ function denomExponent(denom: string): number {
   return denom.toLowerCase() === "uusdc" ? 6 : 6;
 }
 
+function formatRegenMicro(value: string): string {
+  const amount = BigInt(value);
+  return formatMicroAmount(amount, "REGEN", 6);
+}
+
 export async function runMonthlyBatchRetirementTool(
   month: string,
   creditType?: "carbon" | "biodiversity",
@@ -62,6 +67,25 @@ export async function runMonthlyBatchRetirementTool(
       );
     }
 
+    if (result.regenAcquisition) {
+      lines.push(
+        `| REGEN Acquisition Status | ${result.regenAcquisition.status} (${result.regenAcquisition.provider}) |`,
+        `| REGEN Acquisition Spend | ${formatMicroAmount(BigInt(result.regenAcquisition.spendMicro), result.regenAcquisition.spendDenom, denomExponent(result.regenAcquisition.spendDenom))} |`,
+        `| Estimated REGEN | ${formatRegenMicro(result.regenAcquisition.estimatedRegenMicro)} |`
+      );
+
+      if (result.regenAcquisition.acquiredRegenMicro) {
+        lines.push(
+          `| Acquired REGEN | ${formatRegenMicro(result.regenAcquisition.acquiredRegenMicro)} |`
+        );
+      }
+      if (result.regenAcquisition.txHash) {
+        lines.push(
+          `| REGEN Acquisition Tx | \`${result.regenAcquisition.txHash}\` |`
+        );
+      }
+    }
+
     if (result.txHash) {
       lines.push(`| Transaction Hash | \`${result.txHash}\` |`);
     }
@@ -94,6 +118,9 @@ export async function runMonthlyBatchRetirementTool(
     }
 
     lines.push("", result.message);
+    if (result.regenAcquisition) {
+      lines.push(`REGEN acquisition: ${result.regenAcquisition.message}`);
+    }
 
     return { content: [{ type: "text" as const, text: lines.join("\n") }] };
   } catch (error) {

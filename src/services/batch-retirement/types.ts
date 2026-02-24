@@ -39,6 +39,23 @@ export interface ProtocolFeeBreakdown {
   creditBudgetUsdCents: number;
 }
 
+export type RegenAcquisitionStatus =
+  | "planned"
+  | "executed"
+  | "skipped"
+  | "failed";
+
+export interface RegenAcquisitionRecord {
+  provider: string;
+  status: RegenAcquisitionStatus;
+  spendMicro: string;
+  spendDenom: "USDC" | "uusdc";
+  estimatedRegenMicro: string;
+  acquiredRegenMicro?: string;
+  txHash?: string;
+  message: string;
+}
+
 export type BatchExecutionStatus =
   | "success"
   | "failed"
@@ -56,6 +73,7 @@ export interface BatchExecutionRecord {
   spentDenom: string;
   retiredQuantity: string;
   protocolFee?: ProtocolFeeBreakdown;
+  regenAcquisition?: RegenAcquisitionRecord;
   attributions?: ContributorAttribution[];
   txHash?: string;
   blockHeight?: number;
@@ -101,6 +119,7 @@ export interface RunMonthlyBatchResult {
   plannedCostMicro: bigint;
   plannedCostDenom: string;
   protocolFee?: ProtocolFeeBreakdown;
+  regenAcquisition?: RegenAcquisitionRecord;
   attributions?: ContributorAttribution[];
   txHash?: string;
   blockHeight?: number;

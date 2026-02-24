@@ -210,7 +210,8 @@ Supports:
 - `dry_run=true` planning (default, no on-chain transaction),
 - real execution with `dry_run=false`,
 - duplicate-run protection per month (override with `force=true`),
-- protocol fee allocation (configurable `8%-12%`, default `10%`) with gross/fee/net budget reporting.
+- protocol fee allocation (configurable `8%-12%`, default `10%`) with gross/fee/net budget reporting,
+- protocol fee REGEN acquisition adapter output (planned/executed/skipped).
 
 **When it's used:** Running the monthly pooled buy-and-retire process from aggregated subscription funds.
 
@@ -347,6 +348,10 @@ export REGEN_POOL_ACCOUNTING_PATH=./data/pool-accounting-ledger.json
 export REGEN_BATCH_EXECUTIONS_PATH=./data/monthly-batch-executions.json
 # optional protocol fee basis points for monthly pool budgets (800-1200, default 1000)
 export REGEN_PROTOCOL_FEE_BPS=1000
+# optional protocol fee REGEN acquisition provider: disabled | simulated
+export REGEN_ACQUISITION_PROVIDER=disabled
+# optional simulated acquisition rate (micro-REGEN per 1 USDC, default 2000000)
+export REGEN_ACQUISITION_RATE_UREGEN_PER_USDC=2000000
 ```
 
 Note: Stripe mode currently requires USDC-denominated sell orders (`uusdc`) so fiat charges map cleanly to on-chain pricing.

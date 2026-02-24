@@ -28,6 +28,8 @@ export interface Config {
   // ecoBridge EVM wallet (for sending tokens on Base/Ethereum/etc.)
   ecoBridgeEvmMnemonic: string | undefined;
   ecoBridgeEvmDerivationPath: string;
+  regenAcquisitionProvider: "disabled" | "simulated";
+  regenAcquisitionRateUregenPerUsdc: number;
 }
 
 let _config: Config | undefined;
@@ -35,6 +37,8 @@ let _config: Config | undefined;
 const DEFAULT_PROTOCOL_FEE_BPS = 1000;
 const MIN_PROTOCOL_FEE_BPS = 800;
 const MAX_PROTOCOL_FEE_BPS = 1200;
+const DEFAULT_REGEN_ACQUISITION_PROVIDER = "disabled" as const;
+const DEFAULT_REGEN_ACQUISITION_RATE_UREGEN_PER_USDC = 2_000_000;
 
 function parseProtocolFeeBps(rawValue: string | undefined): number {
   if (!rawValue) return DEFAULT_PROTOCOL_FEE_BPS;
@@ -48,6 +52,35 @@ function parseProtocolFeeBps(rawValue: string | undefined): number {
     throw new Error(
       `REGEN_PROTOCOL_FEE_BPS must be an integer between ${MIN_PROTOCOL_FEE_BPS} and ${MAX_PROTOCOL_FEE_BPS}`
     );
+  }
+
+  return parsed;
+}
+
+function parseRegenAcquisitionProvider(
+  rawValue: string | undefined
+): "disabled" | "simulated" {
+  if (!rawValue) return DEFAULT_REGEN_ACQUISITION_PROVIDER;
+
+  const normalized = rawValue.trim().toLowerCase();
+  if (normalized === "disabled") return "disabled";
+  if (normalized === "simulated") return "simulated";
+
+  throw new Error(
+    "REGEN_ACQUISITION_PROVIDER must be one of: disabled, simulated"
+  );
+}
+
+function parsePositiveInteger(
+  rawValue: string | undefined,
+  envName: string,
+  defaultValue: number
+): number {
+  if (!rawValue) return defaultValue;
+
+  const parsed = Number(rawValue);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${envName} must be a positive integer`);
   }
 
   return parsed;
@@ -84,6 +117,14 @@ export function loadConfig(): Config {
     ecoBridgeEvmMnemonic: process.env.ECOBRIDGE_EVM_MNEMONIC || undefined,
     ecoBridgeEvmDerivationPath:
       process.env.ECOBRIDGE_EVM_DERIVATION_PATH || "m/44'/60'/0'/0/0",
+    regenAcquisitionProvider: parseRegenAcquisitionProvider(
+      process.env.REGEN_ACQUISITION_PROVIDER
+    ),
+    regenAcquisitionRateUregenPerUsdc: parsePositiveInteger(
+      process.env.REGEN_ACQUISITION_RATE_UREGEN_PER_USDC,
+      "REGEN_ACQUISITION_RATE_UREGEN_PER_USDC",
+      DEFAULT_REGEN_ACQUISITION_RATE_UREGEN_PER_USDC
+    ),
   };
 
   return _config;

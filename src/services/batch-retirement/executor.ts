@@ -6,6 +6,10 @@ import { PoolAccountingService } from "../pool-accounting/service.js";
 import { buildContributorAttributions } from "./attribution.js";
 import { calculateProtocolFee } from "./fee.js";
 import { selectOrdersForBudget } from "./planner.js";
+import {
+  createRegenAcquisitionProvider,
+  type RegenAcquisitionProvider,
+} from "../regen-acquisition/provider.js";
 import { JsonFileBatchExecutionStore } from "./store.js";
 import type {
   BatchExecutionRecord,
@@ -26,6 +30,7 @@ export interface MonthlyBatchExecutorDeps {
   signAndBroadcast: typeof signAndBroadcast;
   waitForRetirement: typeof waitForRetirement;
   loadConfig: typeof loadConfig;
+  regenAcquisitionProvider: RegenAcquisitionProvider;
 }
 
 function usdToCents(value: number): number {
@@ -52,6 +57,7 @@ function buildExecutionRecord(
     budgetUsdCents: number;
     selection: BudgetOrderSelection;
     protocolFee?: BatchExecutionRecord["protocolFee"];
+    regenAcquisition?: BatchExecutionRecord["regenAcquisition"];
     attributions?: BatchExecutionRecord["attributions"];
     txHash?: string;
     blockHeight?: number;
@@ -72,6 +78,7 @@ function buildExecutionRecord(
     spentDenom: input.selection.paymentDenom,
     retiredQuantity: input.selection.totalQuantity,
     protocolFee: input.protocolFee,
+    regenAcquisition: input.regenAcquisition,
     attributions: input.attributions,
     txHash: input.txHash,
     blockHeight: input.blockHeight,
@@ -85,6 +92,9 @@ export class MonthlyBatchRetirementExecutor {
   private readonly deps: MonthlyBatchExecutorDeps;
 
   constructor(deps?: Partial<MonthlyBatchExecutorDeps>) {
+    const loadConfigDep = deps?.loadConfig || loadConfig;
+    const configForDeps = loadConfigDep();
+
     this.deps = {
       poolAccounting: deps?.poolAccounting || new PoolAccountingService(),
       executionStore: deps?.executionStore || new JsonFileBatchExecutionStore(),
@@ -93,7 +103,14 @@ export class MonthlyBatchRetirementExecutor {
       initWallet: deps?.initWallet || initWallet,
       signAndBroadcast: deps?.signAndBroadcast || signAndBroadcast,
       waitForRetirement: deps?.waitForRetirement || waitForRetirement,
-      loadConfig: deps?.loadConfig || loadConfig,
+      loadConfig: loadConfigDep,
+      regenAcquisitionProvider:
+        deps?.regenAcquisitionProvider ||
+        createRegenAcquisitionProvider({
+          provider: configForDeps.regenAcquisitionProvider,
+          simulatedRateUregenPerUsdc:
+            configForDeps.regenAcquisitionRateUregenPerUsdc,
+        }),
     };
   }
 
@@ -163,12 +180,24 @@ export class MonthlyBatchRetirementExecutor {
       : monthlySummary.totalUsdCents;
 
     const config = this.deps.loadConfig();
+    const retireReason =
+      input.reason || `Monthly subscription pool retirement (${input.month})`;
     const paymentDenom = input.paymentDenom || "USDC";
     const protocolFee = calculateProtocolFee({
       grossBudgetUsdCents: totalBudgetUsdCents,
       protocolFeeBps: config.protocolFeeBps,
       paymentDenom,
     });
+
+    const plannedRegenAcquisition =
+      protocolFee.protocolFeeUsdCents > 0
+        ? await this.deps.regenAcquisitionProvider.planAcquisition({
+            month: input.month,
+            spendMicro: BigInt(protocolFee.protocolFeeMicro),
+            spendDenom: protocolFee.protocolFeeDenom,
+          })
+        : undefined;
+
     const budgetMicro = toBudgetMicro(paymentDenom, protocolFee.creditBudgetUsdCents);
 
     if (protocolFee.creditBudgetUsdCents <= 0) {
@@ -181,6 +210,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedCostMicro: 0n,
         plannedCostDenom: paymentDenom,
         protocolFee,
+        regenAcquisition: plannedRegenAcquisition,
         message:
           "No credit purchase budget remains after applying protocol fee to this monthly pool.",
       };
@@ -202,6 +232,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
         protocolFee,
+        regenAcquisition: plannedRegenAcquisition,
         message:
           "No eligible sell orders were found for the configured budget and filters.",
       };
@@ -217,8 +248,6 @@ export class MonthlyBatchRetirementExecutor {
     });
 
     const retireJurisdiction = input.jurisdiction || config.defaultJurisdiction;
-    const retireReason =
-      input.reason || `Monthly subscription pool retirement (${input.month})`;
 
     if (input.dryRun !== false) {
       const record = buildExecutionRecord("dry_run", {
@@ -228,6 +257,7 @@ export class MonthlyBatchRetirementExecutor {
         budgetUsdCents: totalBudgetUsdCents,
         selection,
         protocolFee,
+        regenAcquisition: plannedRegenAcquisition,
         attributions,
         dryRun: true,
       });
@@ -241,6 +271,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
         protocolFee,
+        regenAcquisition: plannedRegenAcquisition,
         attributions,
         message: "Dry run complete. No on-chain transaction was broadcast.",
         executionRecord: record,
@@ -257,6 +288,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
         protocolFee,
+        regenAcquisition: plannedRegenAcquisition,
         attributions,
         message:
           "Wallet is not configured. Set REGEN_WALLET_MNEMONIC before executing monthly batch retirements.",
@@ -295,6 +327,14 @@ export class MonthlyBatchRetirementExecutor {
           budgetUsdCents: totalBudgetUsdCents,
           selection,
           protocolFee,
+          regenAcquisition: plannedRegenAcquisition
+            ? {
+                ...plannedRegenAcquisition,
+                status: "skipped",
+                message:
+                  "Skipped REGEN acquisition because the retirement transaction was rejected.",
+              }
+            : undefined,
           attributions,
           error: `Transaction rejected (code ${txResult.code}): ${
             txResult.rawLog || "unknown error"
@@ -312,6 +352,7 @@ export class MonthlyBatchRetirementExecutor {
           plannedCostMicro: selection.totalCostMicro,
           plannedCostDenom: selection.paymentDenom,
           protocolFee,
+          regenAcquisition: record.regenAcquisition,
           attributions,
           message: record.error || "Monthly batch transaction failed.",
           executionRecord: record,
@@ -319,6 +360,30 @@ export class MonthlyBatchRetirementExecutor {
       }
 
       const retirement = await this.deps.waitForRetirement(txResult.transactionHash);
+
+      let regenAcquisition = plannedRegenAcquisition;
+      if (plannedRegenAcquisition && plannedRegenAcquisition.status !== "skipped") {
+        try {
+          regenAcquisition = await this.deps.regenAcquisitionProvider.executeAcquisition(
+            {
+              month: input.month,
+              spendMicro: BigInt(protocolFee.protocolFeeMicro),
+              spendDenom: protocolFee.protocolFeeDenom,
+            }
+          );
+        } catch (error) {
+          const errMsg =
+            error instanceof Error
+              ? error.message
+              : "Unknown REGEN acquisition error";
+          regenAcquisition = {
+            ...plannedRegenAcquisition,
+            status: "failed",
+            message: `REGEN acquisition failed: ${errMsg}`,
+          };
+        }
+      }
+
       const record = buildExecutionRecord("success", {
         month: input.month,
         creditType: input.creditType,
@@ -326,6 +391,7 @@ export class MonthlyBatchRetirementExecutor {
         budgetUsdCents: totalBudgetUsdCents,
         selection,
         protocolFee,
+        regenAcquisition,
         attributions,
         txHash: txResult.transactionHash,
         blockHeight: txResult.height,
@@ -343,11 +409,15 @@ export class MonthlyBatchRetirementExecutor {
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
         protocolFee,
+        regenAcquisition,
         attributions,
         txHash: txResult.transactionHash,
         blockHeight: txResult.height,
         retirementId: retirement?.nodeId,
-        message: "Monthly batch retirement completed successfully.",
+        message:
+          regenAcquisition?.status === "failed"
+            ? "Monthly batch retirement completed, but REGEN acquisition failed."
+            : "Monthly batch retirement completed successfully.",
         executionRecord: record,
       };
     } catch (error) {
@@ -360,6 +430,14 @@ export class MonthlyBatchRetirementExecutor {
         budgetUsdCents: totalBudgetUsdCents,
         selection,
         protocolFee,
+        regenAcquisition: plannedRegenAcquisition
+          ? {
+              ...plannedRegenAcquisition,
+              status: "skipped",
+              message:
+                "Skipped REGEN acquisition because monthly retirement execution failed.",
+            }
+          : undefined,
         attributions,
         error: errMsg,
         dryRun: false,
@@ -375,6 +453,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedCostMicro: selection.totalCostMicro,
         plannedCostDenom: selection.paymentDenom,
         protocolFee,
+        regenAcquisition: record.regenAcquisition,
         attributions,
         message: errMsg,
         executionRecord: record,
