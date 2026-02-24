@@ -138,12 +138,9 @@ async function getVersionString(): Promise<string> {
 function parseRegistry(raw: unknown): EcoBridgeRegistry {
   const obj = raw as Record<string, unknown>;
 
-  // Parse chains and their tokens
-  const chainsRaw = Array.isArray(obj.chains) ? obj.chains : [];
-  const chains: EcoBridgeChain[] = chainsRaw.map((c: unknown) => {
-    const chain = c as Record<string, unknown>;
-    const tokensRaw = Array.isArray(chain.tokens) ? chain.tokens : [];
-    const tokens: EcoBridgeToken[] = tokensRaw.map((t: unknown) => {
+  // Helper to parse an array of token objects
+  function parseTokens(raw: unknown[]): EcoBridgeToken[] {
+    return raw.map((t: unknown) => {
       const tok = t as Record<string, unknown>;
       return {
         symbol: String(tok.symbol ?? ""),
@@ -159,13 +156,42 @@ function parseRegistry(raw: unknown): EcoBridgeRegistry {
               : null,
       };
     });
-    return {
-      id: String(chain.id ?? chain.chainId ?? ""),
-      name: String(chain.name ?? chain.id ?? ""),
-      logoUrl: chain.logoUrl ? String(chain.logoUrl) : null,
-      tokens,
-    };
-  });
+  }
+
+  // Parse chains and their tokens.
+  // The API may return either:
+  //   - "chains": [...] (array of chain objects with nested tokens)
+  //   - "supportedTokens": { chainName: [tokens...], ... } (object keyed by chain)
+  let chains: EcoBridgeChain[];
+
+  if (Array.isArray(obj.chains) && obj.chains.length > 0) {
+    // Format: chains array with nested tokens
+    chains = obj.chains.map((c: unknown) => {
+      const chain = c as Record<string, unknown>;
+      const tokensRaw = Array.isArray(chain.tokens) ? chain.tokens : [];
+      return {
+        id: String(chain.id ?? chain.chainId ?? ""),
+        name: String(chain.name ?? chain.id ?? ""),
+        logoUrl: chain.logoUrl ? String(chain.logoUrl) : null,
+        tokens: parseTokens(tokensRaw),
+      };
+    });
+  } else if (
+    obj.supportedTokens &&
+    typeof obj.supportedTokens === "object" &&
+    !Array.isArray(obj.supportedTokens)
+  ) {
+    // Format: supportedTokens object keyed by chain name
+    const st = obj.supportedTokens as Record<string, unknown>;
+    chains = Object.entries(st).map(([chainName, tokensRaw]) => ({
+      id: chainName,
+      name: chainName.charAt(0).toUpperCase() + chainName.slice(1),
+      logoUrl: null,
+      tokens: Array.isArray(tokensRaw) ? parseTokens(tokensRaw) : [],
+    }));
+  } else {
+    chains = [];
+  }
 
   // Parse projects
   const projectsRaw = Array.isArray(obj.projects) ? obj.projects : [];
