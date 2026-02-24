@@ -16,7 +16,10 @@ import {
   getPoolAccountingSummaryTool,
   recordPoolContributionTool,
 } from "./tools/pool-accounting.js";
-import { runMonthlyBatchRetirementTool } from "./tools/monthly-batch-retirement.js";
+import {
+  runMonthlyBatchRetirementTool,
+  runMonthlyReconciliationTool,
+} from "./tools/monthly-batch-retirement.js";
 import {
   getSubscriberAttributionCertificateTool,
   getSubscriberImpactDashboardTool,
@@ -118,11 +121,12 @@ const server = new McpServer(
       "7. sync_all_subscription_pool_contributions — account-wide Stripe paid-invoice reconciliation with pagination",
       "8. record_pool_contribution / get_pool_accounting_summary — track monthly subscription pool accounting",
       "9. run_monthly_batch_retirement — execute the monthly pooled credit retirement batch",
-      "10. get_subscriber_impact_dashboard / get_subscriber_attribution_certificate — user-facing fractional impact views",
-      "11. publish_subscriber_certificate_page — generate a user-facing certificate HTML page and URL",
-      "12. publish_subscriber_dashboard_page — generate a user-facing dashboard HTML page and URL",
-      "13. start_identity_auth_session / verify_identity_auth_session / get_identity_auth_session — hardened identity auth session lifecycle",
-      "14. link_identity_session / recover_identity_session — identity linking and recovery flows",
+      "10. run_monthly_reconciliation — optional contribution sync + monthly batch in one operator workflow",
+      "11. get_subscriber_impact_dashboard / get_subscriber_attribution_certificate — user-facing fractional impact views",
+      "12. publish_subscriber_certificate_page — generate a user-facing certificate HTML page and URL",
+      "13. publish_subscriber_dashboard_page — generate a user-facing dashboard HTML page and URL",
+      "14. start_identity_auth_session / verify_identity_auth_session / get_identity_auth_session — hardened identity auth session lifecycle",
+      "15. link_identity_session / recover_identity_session — identity linking and recovery flows",
       "",
       ...(walletMode
         ? [
@@ -136,6 +140,7 @@ const server = new McpServer(
       "The sync_all_subscription_pool_contributions tool performs account-wide paid invoice ingestion across customers with pagination controls.",
       "Pool accounting tools support per-user contribution tracking and monthly aggregation summaries.",
       "Monthly batch retirement uses pool accounting totals to execute one on-chain retirement per month.",
+      "The run_monthly_reconciliation tool orchestrates contribution sync and monthly batch execution in one call.",
       "Subscriber dashboard tools expose fractional attribution and impact history per user.",
       "Certificate frontend tool publishes shareable subscriber certificate pages to a configurable URL/path.",
       "Dashboard frontend tool publishes shareable subscriber impact dashboard pages to a configurable URL/path.",
@@ -541,6 +546,107 @@ server.tool(
       reason,
       jurisdiction
     );
+  }
+);
+
+// Tool: Reconcile contributions and run monthly batch in one operation
+server.tool(
+  "run_monthly_reconciliation",
+  "Runs monthly pool reconciliation workflow. Optionally syncs paid Stripe invoices first, then executes monthly pooled retirement planning/execution.",
+  {
+    month: z
+      .string()
+      .describe("Target month in YYYY-MM format, e.g. 2026-03"),
+    credit_type: z
+      .enum(["carbon", "biodiversity"])
+      .optional()
+      .describe("Optional credit type filter for the batch retirement"),
+    max_budget_usd: z
+      .number()
+      .optional()
+      .describe("Optional max budget in USD for this run"),
+    dry_run: z
+      .boolean()
+      .optional()
+      .default(true)
+      .describe("If true, plans the batch without broadcasting a transaction"),
+    force: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("If true, allows rerunning a month even if a prior success exists"),
+    reason: z
+      .string()
+      .optional()
+      .describe("Optional retirement reason override"),
+    jurisdiction: z
+      .string()
+      .optional()
+      .describe("Optional retirement jurisdiction override"),
+    sync_scope: z
+      .enum(["none", "customer", "all_customers"])
+      .optional()
+      .default("all_customers")
+      .describe("Contribution sync scope before batch execution"),
+    email: z
+      .string()
+      .optional()
+      .describe("Customer email for sync_scope=customer"),
+    customer_id: z
+      .string()
+      .optional()
+      .describe("Stripe customer ID for sync_scope=customer"),
+    user_id: z
+      .string()
+      .optional()
+      .describe("Optional internal user ID override for synced contributions"),
+    invoice_limit: z
+      .number()
+      .int()
+      .optional()
+      .describe("Invoice fetch size per request (1-100)"),
+    invoice_max_pages: z
+      .number()
+      .int()
+      .optional()
+      .describe("Max pages for account-wide sync (1-50)"),
+  },
+  {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
+  async ({
+    month,
+    credit_type,
+    max_budget_usd,
+    dry_run,
+    force,
+    reason,
+    jurisdiction,
+    sync_scope,
+    email,
+    customer_id,
+    user_id,
+    invoice_limit,
+    invoice_max_pages,
+  }) => {
+    return runMonthlyReconciliationTool({
+      month,
+      creditType: credit_type,
+      maxBudgetUsd: max_budget_usd,
+      dryRun: dry_run,
+      force,
+      reason,
+      jurisdiction,
+      syncScope: sync_scope,
+      email,
+      customerId: customer_id,
+      userId: user_id,
+      invoiceLimit: invoice_limit,
+      invoiceMaxPages: invoice_max_pages,
+    });
   }
 );
 

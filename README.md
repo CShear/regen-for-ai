@@ -249,6 +249,19 @@ Supports:
 
 **When it's used:** Running the monthly pooled buy-and-retire process from aggregated subscription funds.
 
+### `run_monthly_reconciliation`
+
+Runs an operator workflow in one call:
+1. Optional contribution sync from Stripe paid invoices, then
+2. Monthly batch retirement planning/execution.
+
+Supports all `run_monthly_batch_retirement` execution parameters plus sync controls:
+- `sync_scope`: `none` | `customer` | `all_customers` (default),
+- `email` / `customer_id` / `user_id` for customer-scoped sync,
+- `invoice_limit` and `invoice_max_pages` for Stripe pagination control.
+
+**When it's used:** Monthly close/reconciliation where operators want deterministic “sync then run batch” execution with one tool invocation.
+
 ### `publish_subscriber_certificate_page`
 
 Generates a user-facing HTML certificate page for a subscriber's monthly fractional attribution record and returns:
