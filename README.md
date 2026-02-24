@@ -268,6 +268,7 @@ All-customer sync output now reports whether Stripe pagination was truncated by 
 Live execution preflight also requires the latest record for that month/credit type to be a fresh `dry_run` (not older than the latest contribution), unless explicitly overridden.
 Reconciliation runs are also single-flight per month/credit type; concurrent overlapping requests are rejected until the active run completes.
 When a sync/batch timeout is hit, the run lock remains active until the timed-out phase fully settles, preventing overlapping retries from racing.
+Single-flight locking is now file-backed (`REGEN_RECONCILIATION_LOCKS_DIR`) so overlap protection survives process restarts and works across multiple workers sharing the same filesystem.
 If reconciliation run-history persistence fails, execution continues but returns explicit warnings in tool output.
 
 **When it's used:** Monthly close/reconciliation where operators want deterministic “sync then run batch” execution with one tool invocation.
@@ -491,6 +492,16 @@ export STRIPE_PRICE_ID_IMPACT=price_...
 export REGEN_POOL_ACCOUNTING_PATH=./data/pool-accounting-ledger.json
 # optional custom history path for monthly batch executions
 export REGEN_BATCH_EXECUTIONS_PATH=./data/monthly-batch-executions.json
+# optional custom history path for monthly reconciliation orchestration runs
+export REGEN_RECONCILIATION_RUNS_PATH=./data/monthly-reconciliation-runs.json
+# optional lock directory for reconciliation single-flight protection
+export REGEN_RECONCILIATION_LOCKS_DIR=./data/monthly-reconciliation-locks
+# optional stale-lock TTL in milliseconds (default 1800000)
+export REGEN_RECONCILIATION_LOCK_TTL_MS=1800000
+# optional reconciliation run-history write-lock tuning
+export REGEN_RECONCILIATION_RUNS_LOCK_WAIT_MS=10000
+export REGEN_RECONCILIATION_RUNS_LOCK_RETRY_MS=25
+export REGEN_RECONCILIATION_RUNS_LOCK_STALE_MS=60000
 # optional subscriber certificate frontend settings
 export REGEN_CERTIFICATE_BASE_URL=https://regen.network/certificate
 export REGEN_CERTIFICATE_OUTPUT_DIR=./data/certificates

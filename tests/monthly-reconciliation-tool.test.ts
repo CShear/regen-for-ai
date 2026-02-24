@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getExecutionHistory: vi.fn(),
   syncPaidInvoices: vi.fn(),
   getMonthlySummary: vi.fn(),
+  acquireLock: vi.fn(),
   startRun: vi.fn(),
   finishRun: vi.fn(),
   recordBlockedRun: vi.fn(),
@@ -35,6 +36,14 @@ vi.mock("../src/services/pool-accounting/service.js", () => ({
   PoolAccountingService: class {
     getMonthlySummary(month: string) {
       return mocks.getMonthlySummary(month);
+    }
+  },
+}));
+
+vi.mock("../src/services/reconciliation-run-lock/service.js", () => ({
+  ReconciliationRunLockService: class {
+    acquire(lockKey: string) {
+      return mocks.acquireLock(lockKey);
     }
   },
 }));
@@ -71,6 +80,27 @@ function responseText(result: { content: Array<{ type: "text"; text: string }> }
 describe("runMonthlyReconciliationTool", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    const activeLocks = new Set<string>();
+
+    mocks.acquireLock.mockImplementation(async (lockKey: string) => {
+      if (activeLocks.has(lockKey)) {
+        return null;
+      }
+
+      activeLocks.add(lockKey);
+      let released = false;
+      return {
+        key: lockKey,
+        token: `token-${lockKey}`,
+        release: async () => {
+          if (released) {
+            return;
+          }
+          released = true;
+          activeLocks.delete(lockKey);
+        },
+      };
+    });
 
     mocks.syncPaidInvoices.mockResolvedValue({
       scope: "all_customers",

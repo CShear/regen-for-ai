@@ -44,6 +44,9 @@ export interface ReconciliationRunState {
 export interface ReconciliationRunStore {
   readState(): Promise<ReconciliationRunState>;
   writeState(state: ReconciliationRunState): Promise<void>;
+  withExclusiveState?<T>(
+    updater: (state: ReconciliationRunState) => T | Promise<T>
+  ): Promise<T>;
 }
 
 export interface StartReconciliationRunInput {

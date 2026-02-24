@@ -11,6 +11,7 @@ import {
 import { loadConfig } from "../config.js";
 import { calculateProtocolFee } from "../services/batch-retirement/fee.js";
 import { ReconciliationRunHistoryService } from "../services/reconciliation-run-history/service.js";
+import { ReconciliationRunLockService } from "../services/reconciliation-run-lock/service.js";
 import type {
   ReconciliationRunStatus,
   ReconciliationRunSyncSummary,
@@ -20,8 +21,8 @@ const executor = new MonthlyBatchRetirementExecutor();
 const poolAccounting = new PoolAccountingService();
 const poolSync = new SubscriptionPoolSyncService();
 const reconciliationHistory = new ReconciliationRunHistoryService();
+const reconciliationRunLockService = new ReconciliationRunLockService();
 const MONTH_REGEX = /^\d{4}-\d{2}$/;
-const activeReconciliationLocks = new Set<string>();
 
 type SyncScope = "none" | "customer" | "all_customers";
 
@@ -51,18 +52,6 @@ function reconciliationLockKey(
   creditType?: "carbon" | "biodiversity"
 ): string {
   return `${month}:${creditType || "all"}`;
-}
-
-function acquireReconciliationLock(lockKey: string): boolean {
-  if (activeReconciliationLocks.has(lockKey)) {
-    return false;
-  }
-  activeReconciliationLocks.add(lockKey);
-  return true;
-}
-
-function releaseReconciliationLock(lockKey: string): void {
-  activeReconciliationLocks.delete(lockKey);
 }
 
 function resolveTimeoutMs(value: number | undefined, label: string): number | undefined {
@@ -632,7 +621,8 @@ export async function runMonthlyReconciliationTool(
     force: Boolean(input.force),
   } as const;
   const lockKey = reconciliationLockKey(input.month, input.creditType);
-  if (!acquireReconciliationLock(lockKey)) {
+  const acquiredLock = await reconciliationRunLockService.acquire(lockKey);
+  if (!acquiredLock) {
     let blockedRunId: string | undefined;
     const blockedWarnings: string[] = [];
     try {
@@ -991,12 +981,20 @@ export async function runMonthlyReconciliationTool(
       isError: true,
     };
   } finally {
+    const releaseLock = async () => {
+      try {
+        await acquiredLock.release();
+      } catch {
+        // lock release best-effort; stale TTL recovery still prevents deadlock
+      }
+    };
+
     if (timedOutPendingOperations.length > 0) {
-      void Promise.allSettled(timedOutPendingOperations).finally(() => {
-        releaseReconciliationLock(lockKey);
-      });
+      void Promise.allSettled(timedOutPendingOperations).then(() =>
+        releaseLock()
+      );
     } else {
-      releaseReconciliationLock(lockKey);
+      await releaseLock();
     }
   }
 }

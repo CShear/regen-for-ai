@@ -1,9 +1,20 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  open,
+  readFile,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import path from "node:path";
 import type { ReconciliationRunState, ReconciliationRunStore } from "./types.js";
 
 const DEFAULT_RELATIVE_RECONCILIATION_RUNS_PATH =
   "data/monthly-reconciliation-runs.json";
+const DEFAULT_LOCK_WAIT_MS = 10_000;
+const DEFAULT_LOCK_RETRY_MS = 25;
+const DEFAULT_LOCK_STALE_MS = 60_000;
 
 function getDefaultState(): ReconciliationRunState {
   return { version: 1, runs: [] };
@@ -23,10 +34,125 @@ export function getDefaultReconciliationRunsPath(): string {
   return path.resolve(process.cwd(), DEFAULT_RELATIVE_RECONCILIATION_RUNS_PATH);
 }
 
+function resolvePositiveInteger(envName: string, fallback: number): number {
+  const raw = process.env[envName]?.trim();
+  if (!raw) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return fallback;
+  }
+
+  return parsed;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 export class JsonFileReconciliationRunStore implements ReconciliationRunStore {
   constructor(
-    private readonly filePath: string = getDefaultReconciliationRunsPath()
+    private readonly filePath: string = getDefaultReconciliationRunsPath(),
+    private readonly lockWaitMs: number = resolvePositiveInteger(
+      "REGEN_RECONCILIATION_RUNS_LOCK_WAIT_MS",
+      DEFAULT_LOCK_WAIT_MS
+    ),
+    private readonly lockRetryMs: number = resolvePositiveInteger(
+      "REGEN_RECONCILIATION_RUNS_LOCK_RETRY_MS",
+      DEFAULT_LOCK_RETRY_MS
+    ),
+    private readonly lockStaleMs: number = resolvePositiveInteger(
+      "REGEN_RECONCILIATION_RUNS_LOCK_STALE_MS",
+      DEFAULT_LOCK_STALE_MS
+    )
   ) {}
+
+  private lockFilePath(): string {
+    return `${this.filePath}.lock`;
+  }
+
+  private async tryClearStaleLock(): Promise<boolean> {
+    const lockPath = this.lockFilePath();
+
+    try {
+      const lockStat = await stat(lockPath);
+      if (Date.now() - lockStat.mtimeMs < this.lockStaleMs) {
+        return false;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return true;
+      }
+      return false;
+    }
+
+    try {
+      await unlink(lockPath);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return true;
+      }
+      return false;
+    }
+  }
+
+  private async acquireLock(): Promise<void> {
+    const lockPath = this.lockFilePath();
+    const dir = path.dirname(this.filePath);
+    await mkdir(dir, { recursive: true });
+    const startedAt = Date.now();
+
+    while (true) {
+      try {
+        const handle = await open(lockPath, "wx");
+        try {
+          await handle.writeFile(
+            JSON.stringify(
+              { pid: process.pid, acquiredAt: new Date().toISOString() },
+              null,
+              2
+            ),
+            "utf8"
+          );
+        } finally {
+          await handle.close();
+        }
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "EEXIST") {
+          throw error;
+        }
+      }
+
+      if (await this.tryClearStaleLock()) {
+        continue;
+      }
+
+      if (Date.now() - startedAt >= this.lockWaitMs) {
+        throw new Error(
+          `Timed out acquiring reconciliation run history lock after ${this.lockWaitMs}ms`
+        );
+      }
+
+      await wait(this.lockRetryMs);
+    }
+  }
+
+  private async releaseLock(): Promise<void> {
+    try {
+      await unlink(this.lockFilePath());
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
 
   async readState(): Promise<ReconciliationRunState> {
     try {
@@ -51,5 +177,20 @@ export class JsonFileReconciliationRunStore implements ReconciliationRunStore {
     const tempPath = `${this.filePath}.tmp`;
     await writeFile(tempPath, JSON.stringify(state, null, 2), "utf8");
     await rename(tempPath, this.filePath);
+  }
+
+  async withExclusiveState<T>(
+    updater: (state: ReconciliationRunState) => T | Promise<T>
+  ): Promise<T> {
+    await this.acquireLock();
+
+    try {
+      const state = await this.readState();
+      const result = await updater(state);
+      await this.writeState(state);
+      return result;
+    } finally {
+      await this.releaseLock();
+    }
   }
 }

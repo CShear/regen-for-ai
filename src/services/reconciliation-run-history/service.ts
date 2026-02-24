@@ -26,6 +26,19 @@ export class ReconciliationRunHistoryService {
     private readonly store: ReconciliationRunStore = new JsonFileReconciliationRunStore()
   ) {}
 
+  private async mutateState<T>(
+    updater: (state: { version: 1; runs: ReconciliationRunRecord[] }) => T | Promise<T>
+  ): Promise<T> {
+    if (this.store.withExclusiveState) {
+      return this.store.withExclusiveState(updater);
+    }
+
+    const state = await this.store.readState();
+    const result = await updater(state);
+    await this.store.writeState(state);
+    return result;
+  }
+
   async startRun(
     input: StartReconciliationRunInput
   ): Promise<ReconciliationRunRecord> {
@@ -33,46 +46,46 @@ export class ReconciliationRunHistoryService {
       throw new Error("month must be in YYYY-MM format");
     }
 
-    const state = await this.store.readState();
-    const record: ReconciliationRunRecord = {
-      id: `reconcile_${randomUUID()}`,
-      month: input.month,
-      creditType: input.creditType,
-      syncScope: input.syncScope,
-      executionMode: input.executionMode,
-      preflightOnly: input.preflightOnly,
-      force: input.force,
-      status: "in_progress",
-      batchStatus: "in_progress",
-      startedAt: new Date().toISOString(),
-    };
+    return this.mutateState((state) => {
+      const record: ReconciliationRunRecord = {
+        id: `reconcile_${randomUUID()}`,
+        month: input.month,
+        creditType: input.creditType,
+        syncScope: input.syncScope,
+        executionMode: input.executionMode,
+        preflightOnly: input.preflightOnly,
+        force: input.force,
+        status: "in_progress",
+        batchStatus: "in_progress",
+        startedAt: new Date().toISOString(),
+      };
 
-    state.runs.push(record);
-    sortByStartedAtAsc(state.runs);
-    await this.store.writeState(state);
-    return record;
+      state.runs.push(record);
+      sortByStartedAtAsc(state.runs);
+      return record;
+    });
   }
 
   async finishRun(
     runId: string,
     input: FinishReconciliationRunInput
   ): Promise<ReconciliationRunRecord> {
-    const state = await this.store.readState();
-    const record = state.runs.find((item) => item.id === runId);
-    if (!record) {
-      throw new Error(`Unknown reconciliation run id: ${runId}`);
-    }
+    return this.mutateState((state) => {
+      const record = state.runs.find((item) => item.id === runId);
+      if (!record) {
+        throw new Error(`Unknown reconciliation run id: ${runId}`);
+      }
 
-    record.status = input.status;
-    record.batchStatus = input.batchStatus;
-    record.sync = input.sync;
-    record.message = input.message;
-    record.error = input.error;
-    record.finishedAt = new Date().toISOString();
+      record.status = input.status;
+      record.batchStatus = input.batchStatus;
+      record.sync = input.sync;
+      record.message = input.message;
+      record.error = input.error;
+      record.finishedAt = new Date().toISOString();
 
-    sortByStartedAtAsc(state.runs);
-    await this.store.writeState(state);
-    return record;
+      sortByStartedAtAsc(state.runs);
+      return record;
+    });
   }
 
   async recordBlockedRun(
@@ -82,28 +95,28 @@ export class ReconciliationRunHistoryService {
       throw new Error("month must be in YYYY-MM format");
     }
 
-    const state = await this.store.readState();
-    const now = new Date().toISOString();
-    const record: ReconciliationRunRecord = {
-      id: `reconcile_${randomUUID()}`,
-      month: input.month,
-      creditType: input.creditType,
-      syncScope: input.syncScope,
-      executionMode: input.executionMode,
-      preflightOnly: input.preflightOnly,
-      force: input.force,
-      status: "blocked",
-      batchStatus: input.batchStatus,
-      sync: input.sync,
-      message: input.message,
-      startedAt: now,
-      finishedAt: now,
-    };
+    return this.mutateState((state) => {
+      const now = new Date().toISOString();
+      const record: ReconciliationRunRecord = {
+        id: `reconcile_${randomUUID()}`,
+        month: input.month,
+        creditType: input.creditType,
+        syncScope: input.syncScope,
+        executionMode: input.executionMode,
+        preflightOnly: input.preflightOnly,
+        force: input.force,
+        status: "blocked",
+        batchStatus: input.batchStatus,
+        sync: input.sync,
+        message: input.message,
+        startedAt: now,
+        finishedAt: now,
+      };
 
-    state.runs.push(record);
-    sortByStartedAtAsc(state.runs);
-    await this.store.writeState(state);
-    return record;
+      state.runs.push(record);
+      sortByStartedAtAsc(state.runs);
+      return record;
+    });
   }
 
   async getHistory(
