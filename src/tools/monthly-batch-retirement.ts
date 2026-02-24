@@ -23,6 +23,7 @@ export interface RunMonthlyReconciliationInput {
   creditType?: "carbon" | "biodiversity";
   maxBudgetUsd?: number;
   dryRun?: boolean;
+  preflightOnly?: boolean;
   force?: boolean;
   allowPartialSync?: boolean;
   allowExecuteWithoutDryRun?: boolean;
@@ -561,6 +562,29 @@ export async function runMonthlyReconciliationTool(
           isError: true,
         };
       }
+    }
+
+    if (input.preflightOnly) {
+      const lines: string[] = [
+        "## Monthly Reconciliation",
+        "",
+        "| Field | Value |",
+        "|-------|-------|",
+        `| Month | ${input.month} |`,
+        `| Sync Scope | ${syncScope} |`,
+        `| Intended Execution Mode | ${input.dryRun === false ? "live" : "dry_run"} |`,
+        "| Batch Status | preflight_ok |",
+        "",
+        "### Contribution Sync",
+        "",
+        renderSyncSummary(syncScope, syncResult),
+        "",
+        "Preflight checks passed. No batch execution was performed because `preflight_only=true`.",
+      ];
+
+      return {
+        content: [{ type: "text" as const, text: lines.join("\n") }],
+      };
     }
 
     const batchResult = await executor.runMonthlyBatch({

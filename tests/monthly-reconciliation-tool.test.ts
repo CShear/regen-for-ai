@@ -367,6 +367,58 @@ describe("runMonthlyReconciliationTool", () => {
     );
   });
 
+  it("supports preflight-only mode and skips batch execution", async () => {
+    const result = await runMonthlyReconciliationTool({
+      month: "2026-03",
+      preflightOnly: true,
+    });
+    const text = responseText(result);
+
+    expect(result.isError).toBeUndefined();
+    expect(text).toContain("| Batch Status | preflight_ok |");
+    expect(text).toContain("preflight_only=true");
+    expect(mocks.runMonthlyBatch).not.toHaveBeenCalled();
+  });
+
+  it("supports preflight-only mode for intended live execution when checks pass", async () => {
+    mocks.getExecutionHistory.mockResolvedValueOnce([
+      {
+        id: "batch_dry_current",
+        month: "2026-03",
+        creditType: undefined,
+        dryRun: true,
+        status: "dry_run",
+        reason: "plan",
+        budgetUsdCents: 300,
+        spentMicro: "0",
+        spentDenom: "USDC",
+        retiredQuantity: "0.000000",
+        executedAt: "2026-03-31T13:00:00.000Z",
+      },
+    ]);
+    mocks.getMonthlySummary.mockResolvedValueOnce({
+      month: "2026-03",
+      contributionCount: 2,
+      uniqueContributors: 2,
+      totalUsdCents: 600,
+      totalUsd: 6,
+      lastContributionAt: "2026-03-31T12:00:00.000Z",
+      contributors: [],
+    });
+
+    const result = await runMonthlyReconciliationTool({
+      month: "2026-03",
+      dryRun: false,
+      preflightOnly: true,
+    });
+    const text = responseText(result);
+
+    expect(result.isError).toBeUndefined();
+    expect(text).toContain("| Intended Execution Mode | live |");
+    expect(text).toContain("| Batch Status | preflight_ok |");
+    expect(mocks.runMonthlyBatch).not.toHaveBeenCalled();
+  });
+
   it("returns monthly batch execution history table", async () => {
     const result = await getMonthlyBatchExecutionHistoryTool(
       "2026-03",

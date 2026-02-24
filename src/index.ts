@@ -576,6 +576,13 @@ server.tool(
       .optional()
       .default(true)
       .describe("If true, plans the batch without broadcasting a transaction"),
+    preflight_only: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        "If true, runs sync + preflight checks only and skips monthly batch execution"
+      ),
     force: z
       .boolean()
       .optional()
@@ -642,6 +649,7 @@ server.tool(
     credit_type,
     max_budget_usd,
     dry_run,
+    preflight_only,
     force,
     allow_partial_sync,
     allow_execute_without_dry_run,
@@ -659,6 +667,7 @@ server.tool(
       creditType: credit_type,
       maxBudgetUsd: max_budget_usd,
       dryRun: dry_run,
+      preflightOnly: preflight_only,
       force,
       allowPartialSync: allow_partial_sync,
       allowExecuteWithoutDryRun: allow_execute_without_dry_run,
