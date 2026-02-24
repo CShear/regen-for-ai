@@ -273,6 +273,20 @@ Returns stored monthly batch execution history from the local execution ledger (
 
 **When it's used:** Operator auditing, post-run troubleshooting, and confirming prior dry-run/success/failure outcomes.
 
+### `get_monthly_reconciliation_status`
+
+Returns an operator readiness snapshot for a month by combining:
+- pool contribution totals,
+- protocol fee and net budget preview,
+- latest batch execution state (`none`/`dry_run`/`success`/`failed`),
+- actionable recommendation for the next step.
+
+**Parameters:**
+- `month` (`YYYY-MM`, required)
+- `credit_type` (`carbon` | `biodiversity`, optional filter for latest execution lookup)
+
+**When it's used:** Pre-flight check before monthly execution, and quick triage when deciding whether to sync, dry-run, execute, or avoid reruns.
+
 ### `publish_subscriber_certificate_page`
 
 Generates a user-facing HTML certificate page for a subscriber's monthly fractional attribution record and returns:

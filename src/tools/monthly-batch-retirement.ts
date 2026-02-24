@@ -3,13 +3,18 @@ import type {
   BatchExecutionStatus,
   RunMonthlyBatchResult,
 } from "../services/batch-retirement/types.js";
+import { PoolAccountingService } from "../services/pool-accounting/service.js";
 import {
   SubscriptionPoolSyncService,
   type SubscriptionPoolSyncResult,
 } from "../services/subscription/pool-sync.js";
+import { loadConfig } from "../config.js";
+import { calculateProtocolFee } from "../services/batch-retirement/fee.js";
 
 const executor = new MonthlyBatchRetirementExecutor();
+const poolAccounting = new PoolAccountingService();
 const poolSync = new SubscriptionPoolSyncService();
+const MONTH_REGEX = /^\d{4}-\d{2}$/;
 
 type SyncScope = "none" | "customer" | "all_customers";
 
@@ -322,6 +327,88 @@ export async function getMonthlyBatchExecutionHistoryTool(
         {
           type: "text" as const,
           text: `Execution history query failed: ${message}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+}
+
+export async function getMonthlyReconciliationStatusTool(
+  month: string,
+  creditType?: "carbon" | "biodiversity"
+) {
+  try {
+    if (!MONTH_REGEX.test(month)) {
+      throw new Error("month must be in YYYY-MM format");
+    }
+
+    const monthlySummary = await poolAccounting.getMonthlySummary(month);
+    const config = loadConfig();
+    const protocolFee = calculateProtocolFee({
+      grossBudgetUsdCents: monthlySummary.totalUsdCents,
+      protocolFeeBps: config.protocolFeeBps,
+      paymentDenom: "USDC",
+    });
+    const latestExecution = (
+      await executor.getExecutionHistory({
+        month,
+        creditType,
+        limit: 1,
+        newestFirst: true,
+      })
+    )[0];
+
+    const hasContributions = monthlySummary.totalUsdCents > 0;
+    const alreadySucceeded = latestExecution?.status === "success";
+    const readyForExecution = hasContributions && !alreadySucceeded;
+
+    let recommendation = "Run `run_monthly_reconciliation` with `sync_scope=all_customers`.";
+    if (!hasContributions) {
+      recommendation =
+        "No contributions found. Sync invoices first (`run_monthly_reconciliation` with sync enabled), then re-check.";
+    } else if (alreadySucceeded) {
+      recommendation =
+        "A successful execution already exists for this month. Use `force=true` only if rerun is intentional.";
+    } else if (latestExecution?.status === "failed") {
+      recommendation =
+        "Latest execution failed. Run `run_monthly_reconciliation` with `dry_run=true` first, then execute with `dry_run=false`.";
+    } else if (latestExecution?.status === "dry_run") {
+      recommendation =
+        "Dry-run record exists. Execute with `dry_run=false` when ready.";
+    }
+
+    const lines: string[] = [
+      "## Monthly Reconciliation Status",
+      "",
+      "| Field | Value |",
+      "|-------|-------|",
+      `| Month | ${month} |`,
+      `| Credit Type Filter | ${creditType || "all"} |`,
+      `| Contribution Count | ${monthlySummary.contributionCount} |`,
+      `| Unique Contributors | ${monthlySummary.uniqueContributors} |`,
+      `| Gross Pool Budget | ${formatUsd(monthlySummary.totalUsdCents)} |`,
+      `| Protocol Fee | ${formatUsd(protocolFee.protocolFeeUsdCents)} (${(protocolFee.protocolFeeBps / 100).toFixed(2)}%) |`,
+      `| Net Credit Budget | ${formatUsd(protocolFee.creditBudgetUsdCents)} |`,
+      `| Latest Execution Status | ${latestExecution?.status || "none"} |`,
+      `| Latest Execution At | ${latestExecution?.executedAt || "N/A"} |`,
+      `| Latest Execution Dry Run | ${latestExecution ? (latestExecution.dryRun ? "Yes" : "No") : "N/A"} |`,
+      `| Latest Tx Hash | ${latestExecution?.txHash ? `\`${latestExecution.txHash}\`` : "N/A"} |`,
+      `| Latest Retirement ID | ${latestExecution?.retirementId || "N/A"} |`,
+      `| Ready For Execution | ${readyForExecution ? "Yes" : "No"} |`,
+      "",
+      `Recommendation: ${recommendation}`,
+    ];
+
+    return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown reconciliation status error";
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `Monthly reconciliation status query failed: ${message}`,
         },
       ],
       isError: true,

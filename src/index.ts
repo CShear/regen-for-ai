@@ -18,6 +18,7 @@ import {
 } from "./tools/pool-accounting.js";
 import {
   getMonthlyBatchExecutionHistoryTool,
+  getMonthlyReconciliationStatusTool,
   runMonthlyBatchRetirementTool,
   runMonthlyReconciliationTool,
 } from "./tools/monthly-batch-retirement.js";
@@ -124,11 +125,12 @@ const server = new McpServer(
       "9. run_monthly_batch_retirement — execute the monthly pooled credit retirement batch",
       "10. run_monthly_reconciliation — optional contribution sync + monthly batch in one operator workflow",
       "11. get_monthly_batch_execution_history — query stored monthly batch run history with filters",
-      "12. get_subscriber_impact_dashboard / get_subscriber_attribution_certificate — user-facing fractional impact views",
-      "13. publish_subscriber_certificate_page — generate a user-facing certificate HTML page and URL",
-      "14. publish_subscriber_dashboard_page — generate a user-facing dashboard HTML page and URL",
-      "15. start_identity_auth_session / verify_identity_auth_session / get_identity_auth_session — hardened identity auth session lifecycle",
-      "16. link_identity_session / recover_identity_session — identity linking and recovery flows",
+      "12. get_monthly_reconciliation_status — operator readiness/status view for a target month",
+      "13. get_subscriber_impact_dashboard / get_subscriber_attribution_certificate — user-facing fractional impact views",
+      "14. publish_subscriber_certificate_page — generate a user-facing certificate HTML page and URL",
+      "15. publish_subscriber_dashboard_page — generate a user-facing dashboard HTML page and URL",
+      "16. start_identity_auth_session / verify_identity_auth_session / get_identity_auth_session — hardened identity auth session lifecycle",
+      "17. link_identity_session / recover_identity_session — identity linking and recovery flows",
       "",
       ...(walletMode
         ? [
@@ -144,6 +146,7 @@ const server = new McpServer(
       "Monthly batch retirement uses pool accounting totals to execute one on-chain retirement per month.",
       "The run_monthly_reconciliation tool orchestrates contribution sync and monthly batch execution in one call.",
       "The get_monthly_batch_execution_history tool returns persisted batch run history for operator auditing and troubleshooting.",
+      "The get_monthly_reconciliation_status tool summarizes contribution totals, latest execution state, and readiness guidance for a month.",
       "Subscriber dashboard tools expose fractional attribution and impact history per user.",
       "Certificate frontend tool publishes shareable subscriber certificate pages to a configurable URL/path.",
       "Dashboard frontend tool publishes shareable subscriber impact dashboard pages to a configurable URL/path.",
@@ -694,6 +697,30 @@ server.tool(
       dry_run,
       limit
     );
+  }
+);
+
+// Tool: Query monthly reconciliation readiness and latest execution state
+server.tool(
+  "get_monthly_reconciliation_status",
+  "Returns operator-focused monthly reconciliation status including contribution totals, latest execution state, protocol fee/net budget preview, and readiness guidance.",
+  {
+    month: z
+      .string()
+      .describe("Target month in YYYY-MM format"),
+    credit_type: z
+      .enum(["carbon", "biodiversity"])
+      .optional()
+      .describe("Optional credit type filter for latest execution lookup"),
+  },
+  {
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  async ({ month, credit_type }) => {
+    return getMonthlyReconciliationStatusTool(month, credit_type);
   }
 );
 
