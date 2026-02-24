@@ -5,6 +5,7 @@ import type {
   BatchExecutionStore,
   BudgetOrderSelection,
   RegenAcquisitionRecord,
+  RegenBurnRecord,
 } from "../src/services/batch-retirement/types.js";
 
 class InMemoryBatchExecutionStore implements BatchExecutionStore {
@@ -28,6 +29,8 @@ describe("MonthlyBatchRetirementExecutor", () => {
   let getMonthlySummary: ReturnType<typeof vi.fn>;
   let planAcquisition: ReturnType<typeof vi.fn>;
   let executeAcquisition: ReturnType<typeof vi.fn>;
+  let planBurn: ReturnType<typeof vi.fn>;
+  let executeBurn: ReturnType<typeof vi.fn>;
 
   const selection: BudgetOrderSelection = {
     orders: [
@@ -78,6 +81,23 @@ describe("MonthlyBatchRetirementExecutor", () => {
       txHash: "sim_dex_abc",
       message: "Executed simulated DEX acquisition for 2026-03.",
     } satisfies RegenAcquisitionRecord);
+    planBurn = vi.fn().mockResolvedValue({
+      provider: "simulated",
+      status: "planned",
+      amountMicro: "600000",
+      denom: "uregen",
+      burnAddress: "simulated-burn-address",
+      message: "Planned simulated REGEN burn for 2026-03.",
+    } satisfies RegenBurnRecord);
+    executeBurn = vi.fn().mockResolvedValue({
+      provider: "simulated",
+      status: "executed",
+      amountMicro: "600000",
+      denom: "uregen",
+      burnAddress: "simulated-burn-address",
+      txHash: "sim_burn_abc",
+      message: "Executed simulated REGEN burn for 2026-03.",
+    } satisfies RegenBurnRecord);
     getMonthlySummary = vi.fn().mockResolvedValue({
       month: "2026-03",
       contributionCount: 3,
@@ -108,6 +128,11 @@ describe("MonthlyBatchRetirementExecutor", () => {
         name: "simulated",
         planAcquisition,
         executeAcquisition,
+      },
+      regenBurnProvider: {
+        name: "simulated",
+        planBurn,
+        executeBurn,
       },
       loadConfig: () =>
         ({
@@ -159,7 +184,13 @@ describe("MonthlyBatchRetirementExecutor", () => {
       spendDenom: "USDC",
     });
     expect(executeAcquisition).not.toHaveBeenCalled();
+    expect(planBurn).toHaveBeenCalledWith({
+      month: "2026-03",
+      amountMicro: 600_000n,
+    });
+    expect(executeBurn).not.toHaveBeenCalled();
     expect(result.regenAcquisition?.status).toBe("planned");
+    expect(result.regenBurn?.status).toBe("planned");
     expect(result.attributions).toHaveLength(1);
     expect(result.attributions?.[0]).toMatchObject({
       userId: "user-a",
@@ -196,7 +227,12 @@ describe("MonthlyBatchRetirementExecutor", () => {
       spendMicro: 300_000n,
       spendDenom: "USDC",
     });
+    expect(executeBurn).toHaveBeenCalledWith({
+      month: "2026-03",
+      amountMicro: 600_000n,
+    });
     expect(result.regenAcquisition?.status).toBe("executed");
+    expect(result.regenBurn?.status).toBe("executed");
     expect(result.attributions).toHaveLength(1);
 
     const state = await store.readState();
@@ -233,5 +269,27 @@ describe("MonthlyBatchRetirementExecutor", () => {
     });
     expect(forced.status).toBe("success");
     expect(signAndBroadcast).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns success with a warning when REGEN burn fails", async () => {
+    const executor = createExecutor(true);
+
+    executeBurn.mockResolvedValueOnce({
+      provider: "simulated",
+      status: "failed",
+      amountMicro: "600000",
+      denom: "uregen",
+      message: "REGEN burn failed: simulated failure",
+    } satisfies RegenBurnRecord);
+
+    const result = await executor.runMonthlyBatch({
+      month: "2026-04",
+      dryRun: false,
+      creditType: "carbon",
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.regenBurn?.status).toBe("failed");
+    expect(result.message).toContain("REGEN burn failed");
   });
 });

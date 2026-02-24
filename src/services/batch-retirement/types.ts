@@ -56,6 +56,18 @@ export interface RegenAcquisitionRecord {
   message: string;
 }
 
+export type RegenBurnStatus = "planned" | "executed" | "skipped" | "failed";
+
+export interface RegenBurnRecord {
+  provider: string;
+  status: RegenBurnStatus;
+  amountMicro: string;
+  denom: "uregen";
+  burnAddress?: string;
+  txHash?: string;
+  message: string;
+}
+
 export type BatchExecutionStatus =
   | "success"
   | "failed"
@@ -74,6 +86,7 @@ export interface BatchExecutionRecord {
   retiredQuantity: string;
   protocolFee?: ProtocolFeeBreakdown;
   regenAcquisition?: RegenAcquisitionRecord;
+  regenBurn?: RegenBurnRecord;
   attributions?: ContributorAttribution[];
   txHash?: string;
   blockHeight?: number;
@@ -120,6 +133,7 @@ export interface RunMonthlyBatchResult {
   plannedCostDenom: string;
   protocolFee?: ProtocolFeeBreakdown;
   regenAcquisition?: RegenAcquisitionRecord;
+  regenBurn?: RegenBurnRecord;
   attributions?: ContributorAttribution[];
   txHash?: string;
   blockHeight?: number;

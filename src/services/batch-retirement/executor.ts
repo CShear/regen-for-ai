@@ -10,6 +10,10 @@ import {
   createRegenAcquisitionProvider,
   type RegenAcquisitionProvider,
 } from "../regen-acquisition/provider.js";
+import {
+  createRegenBurnProvider,
+  type RegenBurnProvider,
+} from "../regen-burn/provider.js";
 import { JsonFileBatchExecutionStore } from "./store.js";
 import type {
   BatchExecutionRecord,
@@ -31,6 +35,7 @@ export interface MonthlyBatchExecutorDeps {
   waitForRetirement: typeof waitForRetirement;
   loadConfig: typeof loadConfig;
   regenAcquisitionProvider: RegenAcquisitionProvider;
+  regenBurnProvider: RegenBurnProvider;
 }
 
 function usdToCents(value: number): number {
@@ -58,6 +63,7 @@ function buildExecutionRecord(
     selection: BudgetOrderSelection;
     protocolFee?: BatchExecutionRecord["protocolFee"];
     regenAcquisition?: BatchExecutionRecord["regenAcquisition"];
+    regenBurn?: BatchExecutionRecord["regenBurn"];
     attributions?: BatchExecutionRecord["attributions"];
     txHash?: string;
     blockHeight?: number;
@@ -79,6 +85,7 @@ function buildExecutionRecord(
     retiredQuantity: input.selection.totalQuantity,
     protocolFee: input.protocolFee,
     regenAcquisition: input.regenAcquisition,
+    regenBurn: input.regenBurn,
     attributions: input.attributions,
     txHash: input.txHash,
     blockHeight: input.blockHeight,
@@ -110,6 +117,12 @@ export class MonthlyBatchRetirementExecutor {
           provider: configForDeps.regenAcquisitionProvider,
           simulatedRateUregenPerUsdc:
             configForDeps.regenAcquisitionRateUregenPerUsdc,
+        }),
+      regenBurnProvider:
+        deps?.regenBurnProvider ||
+        createRegenBurnProvider({
+          provider: configForDeps.regenBurnProvider,
+          burnAddress: configForDeps.regenBurnAddress,
         }),
     };
   }
@@ -198,6 +211,23 @@ export class MonthlyBatchRetirementExecutor {
           })
         : undefined;
 
+    const plannedRegenBurn =
+      plannedRegenAcquisition &&
+      BigInt(plannedRegenAcquisition.estimatedRegenMicro) > 0n
+        ? await this.deps.regenBurnProvider.planBurn({
+            month: input.month,
+            amountMicro: BigInt(plannedRegenAcquisition.estimatedRegenMicro),
+          })
+        : plannedRegenAcquisition
+          ? {
+              provider: this.deps.regenBurnProvider.name,
+              status: "skipped" as const,
+              amountMicro: "0",
+              denom: "uregen" as const,
+              message: `Skipped REGEN burn because acquisition is ${plannedRegenAcquisition.status}.`,
+            }
+          : undefined;
+
     const budgetMicro = toBudgetMicro(paymentDenom, protocolFee.creditBudgetUsdCents);
 
     if (protocolFee.creditBudgetUsdCents <= 0) {
@@ -211,6 +241,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedCostDenom: paymentDenom,
         protocolFee,
         regenAcquisition: plannedRegenAcquisition,
+        regenBurn: plannedRegenBurn,
         message:
           "No credit purchase budget remains after applying protocol fee to this monthly pool.",
       };
@@ -233,6 +264,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedCostDenom: selection.paymentDenom,
         protocolFee,
         regenAcquisition: plannedRegenAcquisition,
+        regenBurn: plannedRegenBurn,
         message:
           "No eligible sell orders were found for the configured budget and filters.",
       };
@@ -258,6 +290,7 @@ export class MonthlyBatchRetirementExecutor {
         selection,
         protocolFee,
         regenAcquisition: plannedRegenAcquisition,
+        regenBurn: plannedRegenBurn,
         attributions,
         dryRun: true,
       });
@@ -272,6 +305,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedCostDenom: selection.paymentDenom,
         protocolFee,
         regenAcquisition: plannedRegenAcquisition,
+        regenBurn: plannedRegenBurn,
         attributions,
         message: "Dry run complete. No on-chain transaction was broadcast.",
         executionRecord: record,
@@ -289,6 +323,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedCostDenom: selection.paymentDenom,
         protocolFee,
         regenAcquisition: plannedRegenAcquisition,
+        regenBurn: plannedRegenBurn,
         attributions,
         message:
           "Wallet is not configured. Set REGEN_WALLET_MNEMONIC before executing monthly batch retirements.",
@@ -335,6 +370,14 @@ export class MonthlyBatchRetirementExecutor {
                   "Skipped REGEN acquisition because the retirement transaction was rejected.",
               }
             : undefined,
+          regenBurn: plannedRegenBurn
+            ? {
+                ...plannedRegenBurn,
+                status: "skipped",
+                message:
+                  "Skipped REGEN burn because the retirement transaction was rejected.",
+              }
+            : undefined,
           attributions,
           error: `Transaction rejected (code ${txResult.code}): ${
             txResult.rawLog || "unknown error"
@@ -353,6 +396,7 @@ export class MonthlyBatchRetirementExecutor {
           plannedCostDenom: selection.paymentDenom,
           protocolFee,
           regenAcquisition: record.regenAcquisition,
+          regenBurn: record.regenBurn,
           attributions,
           message: record.error || "Monthly batch transaction failed.",
           executionRecord: record,
@@ -384,6 +428,50 @@ export class MonthlyBatchRetirementExecutor {
         }
       }
 
+      let regenBurn = plannedRegenBurn;
+      if (regenAcquisition) {
+        if (regenAcquisition.status === "executed") {
+          const burnAmountMicro = BigInt(
+            regenAcquisition.acquiredRegenMicro ||
+              regenAcquisition.estimatedRegenMicro
+          );
+          if (burnAmountMicro > 0n) {
+            try {
+              regenBurn = await this.deps.regenBurnProvider.executeBurn({
+                month: input.month,
+                amountMicro: burnAmountMicro,
+              });
+            } catch (error) {
+              const errMsg =
+                error instanceof Error ? error.message : "Unknown REGEN burn error";
+              regenBurn = {
+                provider: this.deps.regenBurnProvider.name,
+                status: "failed",
+                amountMicro: burnAmountMicro.toString(),
+                denom: "uregen",
+                message: `REGEN burn failed: ${errMsg}`,
+              };
+            }
+          } else {
+            regenBurn = {
+              provider: this.deps.regenBurnProvider.name,
+              status: "skipped",
+              amountMicro: "0",
+              denom: "uregen",
+              message: "Skipped REGEN burn because acquisition amount was zero.",
+            };
+          }
+        } else {
+          regenBurn = {
+            provider: this.deps.regenBurnProvider.name,
+            status: "skipped",
+            amountMicro: "0",
+            denom: "uregen",
+            message: `Skipped REGEN burn because acquisition status is ${regenAcquisition.status}.`,
+          };
+        }
+      }
+
       const record = buildExecutionRecord("success", {
         month: input.month,
         creditType: input.creditType,
@@ -392,6 +480,7 @@ export class MonthlyBatchRetirementExecutor {
         selection,
         protocolFee,
         regenAcquisition,
+        regenBurn,
         attributions,
         txHash: txResult.transactionHash,
         blockHeight: txResult.height,
@@ -410,6 +499,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedCostDenom: selection.paymentDenom,
         protocolFee,
         regenAcquisition,
+        regenBurn,
         attributions,
         txHash: txResult.transactionHash,
         blockHeight: txResult.height,
@@ -417,6 +507,8 @@ export class MonthlyBatchRetirementExecutor {
         message:
           regenAcquisition?.status === "failed"
             ? "Monthly batch retirement completed, but REGEN acquisition failed."
+            : regenBurn?.status === "failed"
+              ? "Monthly batch retirement completed, but REGEN burn failed."
             : "Monthly batch retirement completed successfully.",
         executionRecord: record,
       };
@@ -438,6 +530,14 @@ export class MonthlyBatchRetirementExecutor {
                 "Skipped REGEN acquisition because monthly retirement execution failed.",
             }
           : undefined,
+        regenBurn: plannedRegenBurn
+          ? {
+              ...plannedRegenBurn,
+              status: "skipped",
+              message:
+                "Skipped REGEN burn because monthly retirement execution failed.",
+            }
+          : undefined,
         attributions,
         error: errMsg,
         dryRun: false,
@@ -454,6 +554,7 @@ export class MonthlyBatchRetirementExecutor {
         plannedCostDenom: selection.paymentDenom,
         protocolFee,
         regenAcquisition: record.regenAcquisition,
+        regenBurn: record.regenBurn,
         attributions,
         message: errMsg,
         executionRecord: record,

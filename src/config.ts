@@ -30,6 +30,8 @@ export interface Config {
   ecoBridgeEvmDerivationPath: string;
   regenAcquisitionProvider: "disabled" | "simulated";
   regenAcquisitionRateUregenPerUsdc: number;
+  regenBurnProvider: "disabled" | "simulated" | "onchain";
+  regenBurnAddress: string | undefined;
 }
 
 let _config: Config | undefined;
@@ -39,6 +41,7 @@ const MIN_PROTOCOL_FEE_BPS = 800;
 const MAX_PROTOCOL_FEE_BPS = 1200;
 const DEFAULT_REGEN_ACQUISITION_PROVIDER = "disabled" as const;
 const DEFAULT_REGEN_ACQUISITION_RATE_UREGEN_PER_USDC = 2_000_000;
+const DEFAULT_REGEN_BURN_PROVIDER = "disabled" as const;
 
 function parseProtocolFeeBps(rawValue: string | undefined): number {
   if (!rawValue) return DEFAULT_PROTOCOL_FEE_BPS;
@@ -86,6 +89,21 @@ function parsePositiveInteger(
   return parsed;
 }
 
+function parseRegenBurnProvider(
+  rawValue: string | undefined
+): "disabled" | "simulated" | "onchain" {
+  if (!rawValue) return DEFAULT_REGEN_BURN_PROVIDER;
+
+  const normalized = rawValue.trim().toLowerCase();
+  if (normalized === "disabled") return "disabled";
+  if (normalized === "simulated") return "simulated";
+  if (normalized === "onchain") return "onchain";
+
+  throw new Error(
+    "REGEN_BURN_PROVIDER must be one of: disabled, simulated, onchain"
+  );
+}
+
 export function loadConfig(): Config {
   if (_config) return _config;
 
@@ -125,6 +143,8 @@ export function loadConfig(): Config {
       "REGEN_ACQUISITION_RATE_UREGEN_PER_USDC",
       DEFAULT_REGEN_ACQUISITION_RATE_UREGEN_PER_USDC
     ),
+    regenBurnProvider: parseRegenBurnProvider(process.env.REGEN_BURN_PROVIDER),
+    regenBurnAddress: process.env.REGEN_BURN_ADDRESS?.trim() || undefined,
   };
 
   return _config;

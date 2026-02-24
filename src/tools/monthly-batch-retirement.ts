@@ -86,6 +86,19 @@ export async function runMonthlyBatchRetirementTool(
       }
     }
 
+    if (result.regenBurn) {
+      lines.push(
+        `| REGEN Burn Status | ${result.regenBurn.status} (${result.regenBurn.provider}) |`,
+        `| REGEN Burn Amount | ${formatMicroAmount(BigInt(result.regenBurn.amountMicro), "REGEN", 6)} |`
+      );
+      if (result.regenBurn.burnAddress) {
+        lines.push(`| REGEN Burn Address | \`${result.regenBurn.burnAddress}\` |`);
+      }
+      if (result.regenBurn.txHash) {
+        lines.push(`| REGEN Burn Tx | \`${result.regenBurn.txHash}\` |`);
+      }
+    }
+
     if (result.txHash) {
       lines.push(`| Transaction Hash | \`${result.txHash}\` |`);
     }
@@ -120,6 +133,9 @@ export async function runMonthlyBatchRetirementTool(
     lines.push("", result.message);
     if (result.regenAcquisition) {
       lines.push(`REGEN acquisition: ${result.regenAcquisition.message}`);
+    }
+    if (result.regenBurn) {
+      lines.push(`REGEN burn: ${result.regenBurn.message}`);
     }
 
     return { content: [{ type: "text" as const, text: lines.join("\n") }] };

@@ -211,7 +211,8 @@ Supports:
 - real execution with `dry_run=false`,
 - duplicate-run protection per month (override with `force=true`),
 - protocol fee allocation (configurable `8%-12%`, default `10%`) with gross/fee/net budget reporting,
-- protocol fee REGEN acquisition adapter output (planned/executed/skipped).
+- protocol fee REGEN acquisition adapter output (planned/executed/skipped),
+- REGEN burn execution status (planned/executed/skipped/failed).
 
 **When it's used:** Running the monthly pooled buy-and-retire process from aggregated subscription funds.
 
@@ -352,6 +353,10 @@ export REGEN_PROTOCOL_FEE_BPS=1000
 export REGEN_ACQUISITION_PROVIDER=disabled
 # optional simulated acquisition rate (micro-REGEN per 1 USDC, default 2000000)
 export REGEN_ACQUISITION_RATE_UREGEN_PER_USDC=2000000
+# optional REGEN burn provider: disabled | simulated | onchain
+export REGEN_BURN_PROVIDER=disabled
+# required when REGEN_BURN_PROVIDER=onchain
+export REGEN_BURN_ADDRESS=regen1...
 ```
 
 Note: Stripe mode currently requires USDC-denominated sell orders (`uusdc`) so fiat charges map cleanly to on-chain pricing.
