@@ -1,0 +1,24 @@
+Listing GTM: Buy + Participate + Proof
+
+This campaign is focused on long-term aligned participation.
+Anyone can opt in (holder or non-holder supporter).
+
+How to join:
+1. Buy on Coinstore: https://www.coinstore.com/home
+2. Complete supporter opt-in + one regeneration participation action.
+3. Submit proof in this group using:
+   #proof
+   tx_hash: <your_tx_hash>
+   certificate_url: <your_certificate_url>
+   wallet: <your_wallet>
+
+Live links:
+- Landing page: {{LANDING_URL}}
+- Proof board: {{PROOF_URL}}
+- Campaign rules: {{RULES_URL}}
+- Telegram community (external): https://t.me/regennetwork_public
+
+Important:
+- No financial advice or return promises.
+- Verification is required for campaign credit.
+- Duplicate or fraudulent submissions are disqualified.

@@ -46,6 +46,8 @@ This project includes a `CLAUDE.md` file that gives Claude Code full context abo
 - Include a clear description of what changed and why
 - Update relevant documentation if behavior changes
 - Add tests for new functionality (when test infrastructure is set up)
+- Use the repo PR template (`.github/pull_request_template.md`) and complete the `pr_context` block for fast human/agent handoff
+- Assign explicit `owner`, `approver`, and `publisher` in the PR body before requesting final review
 
 ## Key Design Principles
 

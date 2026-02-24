@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Regenerative AI Proof Board</title>
+    <meta
+      name="description"
+      content="Public proof board for regeneration-linked participation and supporter verification."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;500&family=Sora:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./assets/regen-campaign.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="top-nav">
+        <a class="brand" href="./listing-landing.html">
+          <span class="brand-dot"></span>
+          <span data-brand-text="stackName">Regen AI Supporter Stack</span>
+        </a>
+        <nav class="nav-links" aria-label="Primary">
+          <a class="nav-link" href="./listing-landing.html">Landing</a>
+          <a class="nav-link" href="./supporter-opt-in.html">Supporter Opt-In</a>
+          <a class="nav-link is-active" href="./proof-page.html">Proof Board</a>
+          <a class="nav-link" href="./supporter-opt-in.html#campaign-rules">Rules</a>
+        </nav>
+      </header>
+
+      <section class="hero">
+        <div class="hero-body">
+          <span class="kicker">Verification Layer</span>
+          <h1>Proof over hype.</h1>
+          <p>
+            This board tracks regeneration actions and supporter participation evidence.
+            Use it as the primary reference for campaign credibility.
+          </p>
+          <div class="hero-cta-row">
+            <a class="btn" href="./supporter-opt-in.html">Submit Supporter Opt-In</a>
+            <a
+              class="btn btn-primary"
+              href="https://www.coinstore.com/home"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open Coinstore
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Campaign Metrics</h2>
+        <div class="metric-row">
+          <article class="metric">
+            <div class="name">Total Retirements</div>
+            <div class="value" id="metric-retirements">0</div>
+          </article>
+          <article class="metric">
+            <div class="name">Credits Retired</div>
+            <div class="value" id="metric-credits">0.000000</div>
+          </article>
+          <article class="metric">
+            <div class="name">Opted-In Supporters</div>
+            <div class="value" id="metric-supporters">0</div>
+          </article>
+        </div>
+        <p class="footer-note">
+          Last feed update: <span id="feed-updated-at" class="mono">-</span>
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Verified Retirement Feed</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Retirement ID</th>
+                <th>Tx Hash</th>
+                <th>Certificate</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="retirement-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Local Proof Submissions (Operator Cache)</h2>
+        <p class="subtle">
+          This section stores quick submissions in local browser storage during live ops.
+          It is useful for triage before final indexing.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Submitted</th>
+                <th>Retirement ID</th>
+                <th>Tx Hash</th>
+                <th>Certificate URL</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody id="local-proof-rows"></tbody>
+          </table>
+        </div>
+
+        <form id="proof-form" class="form-grid" style="margin-top: 0.75rem;">
+          <div class="field">
+            <label for="retirement_id">Retirement ID</label>
+            <input id="retirement_id" name="retirement_id" required />
+          </div>
+          <div class="field">
+            <label for="tx_hash">Tx Hash</label>
+            <input id="tx_hash" name="tx_hash" required />
+          </div>
+          <div class="field full">
+            <label for="certificate_url">Certificate URL</label>
+            <input
+              id="certificate_url"
+              name="certificate_url"
+              type="url"
+              placeholder="https://regen.network/certificate/..."
+              required
+            />
+          </div>
+          <div class="field full">
+            <label for="proof_note">Note</label>
+            <textarea
+              id="proof_note"
+              name="proof_note"
+              placeholder="Optional context, e.g., listing-day retirement batch"
+            ></textarea>
+          </div>
+          <div class="field full">
+            <div class="hero-cta-row">
+              <button class="btn btn-primary" type="submit">Save Local Proof</button>
+              <button class="btn" type="button" id="copy-proof-btn">Copy #proof Block</button>
+            </div>
+          </div>
+        </form>
+        <div id="proof-message"></div>
+      </section>
+
+      <p class="footer-note">
+        Verification routine: open certificate, cross-check tx hash, confirm date and note.
+      </p>
+    </main>
+
+    <script src="./assets/regen-campaign.js"></script>
+    <script>
+      window.RegenCampaign.applyBrand();
+
+      const fallbackFeed = {
+        updated_at: "2026-02-24T12:00:00Z",
+        totals: {
+          retirements: 3,
+          credits_retired: "14.320000",
+          supporters_opted_in: 27
+        },
+        recent_retirements: [
+          {
+            date: "2026-02-24",
+            retirement_id: "WyLaunch001",
+            tx_hash: "ABC123-LAUNCH-TX",
+            certificate_url: "https://regen.network/certificate/sample-001",
+            notes: "Listing day pooled retirement"
+          },
+          {
+            date: "2026-02-23",
+            retirement_id: "WyLaunch000",
+            tx_hash: "ABC122-PRELAUNCH",
+            certificate_url: "https://regen.network/certificate/sample-000",
+            notes: "Pre-launch rehearsal batch"
+          },
+          {
+            date: "2026-02-22",
+            retirement_id: "WyPilot199",
+            tx_hash: "ABC121-PILOT",
+            certificate_url: "https://regen.network/certificate/sample-199",
+            notes: "Pilot run verification"
+          }
+        ]
+      };
+
+      async function loadFeed() {
+        try {
+          const response = await fetch("./proof-feed.json", { cache: "no-store" });
+          if (!response.ok) throw new Error("proof-feed.json not found");
+          return await response.json();
+        } catch {
+          return fallbackFeed;
+        }
+      }
+
+      function renderRetirementRows(feed) {
+        const rows = document.getElementById("retirement-rows");
+        rows.innerHTML = (feed.recent_retirements || [])
+          .map((item) => {
+            return `
+              <tr>
+                <td>${item.date || "-"}</td>
+                <td class="mono">${item.retirement_id || "-"}</td>
+                <td class="mono">${item.tx_hash || "-"}</td>
+                <td><a href="${item.certificate_url || "#"}" target="_blank" rel="noreferrer">open</a></td>
+                <td>${item.notes || ""}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      function renderLocalProofs() {
+        const entries = window.RegenCampaign.loadLocalProofs();
+        const rows = document.getElementById("local-proof-rows");
+
+        if (!entries.length) {
+          rows.innerHTML = `
+            <tr>
+              <td colspan="5">No local proof submissions yet.</td>
+            </tr>
+          `;
+          return;
+        }
+
+        rows.innerHTML = entries
+          .map((item) => {
+            return `
+              <tr>
+                <td>${window.RegenCampaign.formatIsoDate(item.createdAt)}</td>
+                <td class="mono">${item.retirementId}</td>
+                <td class="mono">${item.txHash}</td>
+                <td><a href="${item.certificateUrl}" target="_blank" rel="noreferrer">open</a></td>
+                <td>${item.note || ""}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+
+      async function renderFeed() {
+        const feed = await loadFeed();
+        const supporterProfile = window.RegenCampaign.loadSupporterProfile();
+
+        document.getElementById("metric-retirements").textContent = String(
+          feed?.totals?.retirements || 0
+        );
+        document.getElementById("metric-credits").textContent =
+          feed?.totals?.credits_retired || "0.000000";
+
+        const supporterCountFromFeed = Number(feed?.totals?.supporters_opted_in || 0);
+        const supporterCount = supporterProfile
+          ? Math.max(1, supporterCountFromFeed)
+          : supporterCountFromFeed;
+        document.getElementById("metric-supporters").textContent = String(supporterCount);
+
+        document.getElementById("feed-updated-at").textContent =
+          window.RegenCampaign.formatIsoDate(feed.updated_at || "");
+        renderRetirementRows(feed);
+        renderLocalProofs();
+      }
+
+      function setMessage(text) {
+        const target = document.getElementById("proof-message");
+        target.className = "message";
+        target.textContent = text;
+      }
+
+      function setupProofForm() {
+        const form = document.getElementById("proof-form");
+        const copyProofBtn = document.getElementById("copy-proof-btn");
+        const supporter = window.RegenCampaign.loadSupporterProfile();
+        let lastEntry = null;
+
+        form.addEventListener("submit", (event) => {
+          event.preventDefault();
+          const formData = new FormData(form);
+          const entry = {
+            createdAt: new Date().toISOString(),
+            retirementId: String(formData.get("retirement_id") || "").trim(),
+            txHash: String(formData.get("tx_hash") || "").trim(),
+            certificateUrl: String(formData.get("certificate_url") || "").trim(),
+            note: String(formData.get("proof_note") || "").trim(),
+          };
+
+          window.RegenCampaign.appendLocalProof(entry);
+          lastEntry = entry;
+          renderLocalProofs();
+          form.reset();
+          setMessage("Local proof saved. You can now copy a #proof block for Telegram.");
+        });
+
+        copyProofBtn.addEventListener("click", async () => {
+          if (!lastEntry) {
+            setMessage("Save a proof entry first, then copy the #proof block.");
+            return;
+          }
+
+          const block = window.RegenCampaign.buildProofPost(
+            lastEntry,
+            supporter?.supporterId
+          );
+          await window.RegenCampaign.copyText(block);
+          setMessage("Copied #proof block to clipboard.");
+        });
+      }
+
+      renderFeed();
+      setupProofForm();
+    </script>
+  </body>
+</html>

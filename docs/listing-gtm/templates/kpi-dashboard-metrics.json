@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "metrics": [
+    {
+      "id": "new_holders_weekly",
+      "name": "New holders (weekly)",
+      "owner": "",
+      "source": "",
+      "cadence": "weekly"
+    },
+    {
+      "id": "holder_retention_30d_pct",
+      "name": "30-day holder retention (%)",
+      "owner": "",
+      "source": "",
+      "cadence": "weekly"
+    },
+    {
+      "id": "participants_with_verified_action",
+      "name": "Participants with verified action",
+      "owner": "",
+      "source": "",
+      "cadence": "daily"
+    },
+    {
+      "id": "verification_actions_total",
+      "name": "Total verification actions",
+      "owner": "",
+      "source": "",
+      "cadence": "daily"
+    },
+    {
+      "id": "credits_retired_total",
+      "name": "Credits retired (total)",
+      "owner": "",
+      "source": "",
+      "cadence": "daily"
+    },
+    {
+      "id": "certificates_published_total",
+      "name": "Certificates published (total)",
+      "owner": "",
+      "source": "",
+      "cadence": "daily"
+    },
+    {
+      "id": "buy_sell_ratio",
+      "name": "Buy/Sell ratio",
+      "owner": "",
+      "source": "",
+      "cadence": "daily"
+    },
+    {
+      "id": "avg_spread_bps",
+      "name": "Average spread (bps)",
+      "owner": "",
+      "source": "",
+      "cadence": "daily"
+    },
+    {
+      "id": "top_of_book_depth_usd",
+      "name": "Top-of-book depth (USD)",
+      "owner": "",
+      "source": "",
+      "cadence": "daily"
+    }
+  ]
+}

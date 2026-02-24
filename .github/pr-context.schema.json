@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pull Request Context",
+  "description": "Machine-readable context embedded in PR body under `pr_context`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "change_type",
+    "scope",
+    "release_blocking",
+    "risk_level",
+    "breaking_change",
+    "db_migration",
+    "requires_follow_up",
+    "owner",
+    "approver",
+    "publisher"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "change_type": {
+      "type": "string",
+      "enum": ["feat", "fix", "docs", "refactor", "test", "chore"]
+    },
+    "scope": {
+      "type": "string",
+      "minLength": 1
+    },
+    "linked_issue": {
+      "type": "string"
+    },
+    "release_blocking": {
+      "type": "boolean"
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    },
+    "breaking_change": {
+      "type": "boolean"
+    },
+    "db_migration": {
+      "type": "boolean"
+    },
+    "requires_follow_up": {
+      "type": "boolean"
+    },
+    "owner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "approver": {
+      "type": "string",
+      "minLength": 1
+    },
+    "publisher": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

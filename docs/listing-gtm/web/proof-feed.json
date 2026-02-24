@@ -1,0 +1,31 @@
+{
+  "updated_at": "2026-02-24T12:00:00Z",
+  "totals": {
+    "retirements": 3,
+    "credits_retired": "14.320000",
+    "supporters_opted_in": 27
+  },
+  "recent_retirements": [
+    {
+      "date": "2026-02-24",
+      "retirement_id": "WyLaunch001",
+      "tx_hash": "ABC123-LAUNCH-TX",
+      "certificate_url": "https://regen.network/certificate/sample-001",
+      "notes": "Listing day pooled retirement"
+    },
+    {
+      "date": "2026-02-23",
+      "retirement_id": "WyLaunch000",
+      "tx_hash": "ABC122-PRELAUNCH",
+      "certificate_url": "https://regen.network/certificate/sample-000",
+      "notes": "Pre-launch rehearsal batch"
+    },
+    {
+      "date": "2026-02-22",
+      "retirement_id": "WyPilot199",
+      "tx_hash": "ABC121-PILOT",
+      "certificate_url": "https://regen.network/certificate/sample-199",
+      "notes": "Pilot run verification"
+    }
+  ]
+}

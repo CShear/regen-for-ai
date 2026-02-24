@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Supporter Opt-In | Regenerative AI</title>
+    <meta
+      name="description"
+      content="Anyone can opt in as a long-term supporter: align token or non-token AI prompting with regeneration stewardship."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;500&family=Sora:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./assets/regen-campaign.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="top-nav">
+        <a class="brand" href="./listing-landing.html">
+          <span class="brand-dot"></span>
+          <span data-brand-text="stackName">Regen AI Supporter Stack</span>
+        </a>
+        <nav class="nav-links" aria-label="Primary">
+          <a class="nav-link" href="./listing-landing.html">Landing</a>
+          <a class="nav-link is-active" href="./supporter-opt-in.html">Supporter Opt-In</a>
+          <a class="nav-link" href="./proof-page.html">Proof Board</a>
+          <a class="nav-link" href="#campaign-rules">Rules</a>
+        </nav>
+      </header>
+
+      <section class="hero">
+        <div class="hero-body">
+          <span class="kicker">Long-Term Supporter Intake</span>
+          <h1>Opt in with intent, not just entry timing.</h1>
+          <p>
+            Anyone can opt in, including non-holders. This form captures your support profile:
+            participation mode, AI prompt cadence, and local ecosystem context. After submission,
+            copy your opt-in block for community proof.
+          </p>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Open Opt-In Paths</h2>
+        <div class="grid-3">
+          <article class="panel">
+            <h3>Holder Path</h3>
+            <p>Hold token and attach support behavior to ongoing AI prompting.</p>
+          </article>
+          <article class="panel">
+            <h3>Non-Holder Path</h3>
+            <p>No token required. Join as a contributor and submit verifiable proof actions.</p>
+          </article>
+          <article class="panel">
+            <h3>Hybrid Path</h3>
+            <p>Combine token alignment with direct recurring regeneration support.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Supporter Profile</h2>
+        <form id="supporter-form" class="form-grid">
+          <div class="field">
+            <label for="supporter_name">Display Name</label>
+            <input id="supporter_name" name="supporter_name" required />
+          </div>
+          <div class="field">
+            <label for="telegram_handle">Telegram Handle</label>
+            <input
+              id="telegram_handle"
+              name="telegram_handle"
+              placeholder="@yourhandle"
+            />
+          </div>
+          <div class="field">
+            <label for="contact_email">Contact Email</label>
+            <input
+              id="contact_email"
+              name="contact_email"
+              type="email"
+              placeholder="name@example.com"
+            />
+          </div>
+          <div class="field">
+            <label for="wallet_reference">Wallet or Exchange Reference (optional)</label>
+            <input
+              id="wallet_reference"
+              name="wallet_reference"
+              placeholder="wallet address or exchange UID"
+            />
+          </div>
+          <div class="field">
+            <label for="participation_mode">Participation Mode</label>
+            <select id="participation_mode" name="participation_mode" required>
+              <option value="holder">Holder</option>
+              <option value="supporter_no_token">Non-holder supporter</option>
+              <option value="hybrid" selected>Hybrid</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="offset_path">Offset/Contribution Path</label>
+            <select id="offset_path" name="offset_path" required>
+              <option value="token_aligned">Token-aligned participation</option>
+              <option value="direct_contribution">Direct recurring contribution</option>
+              <option value="pooled_membership" selected>Pooled membership contribution</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="holding_horizon_months">Holding Horizon</label>
+            <select id="holding_horizon_months" name="holding_horizon_months" required>
+              <option value="3">3 months</option>
+              <option value="6">6 months</option>
+              <option value="12" selected>12 months</option>
+              <option value="24">24 months</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="ai_prompt_cadence">AI Prompt Cadence</label>
+            <select id="ai_prompt_cadence" name="ai_prompt_cadence" required>
+              <option value="light">Light (1-3 sessions/week)</option>
+              <option value="active" selected>Active (4-7 sessions/week)</option>
+              <option value="intense">Intense (daily, high volume)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="monthly_regen_usd">Monthly Regeneration Support (USD)</label>
+            <select id="monthly_regen_usd" name="monthly_regen_usd" required>
+              <option value="1">$1</option>
+              <option value="3">$3</option>
+              <option value="5" selected>$5</option>
+              <option value="10">$10</option>
+              <option value="25">$25+</option>
+            </select>
+          </div>
+          <div class="field full">
+            <label for="local_ecosystem">
+              Local Ecosystem Context
+            </label>
+            <input
+              id="local_ecosystem"
+              name="local_ecosystem"
+              placeholder="e.g., Cascadia watershed, Yucatan forest corridor, local mangrove coast"
+              required
+            />
+          </div>
+          <div class="field full">
+            <label>Nature Stewardship Focus</label>
+            <div class="chip-set">
+              <label class="chip"><input type="checkbox" name="focus" value="soil" />Soil</label>
+              <label class="chip"><input type="checkbox" name="focus" value="watershed" />Watershed</label>
+              <label class="chip"><input type="checkbox" name="focus" value="forest" />Forest</label>
+              <label class="chip"><input type="checkbox" name="focus" value="coastal" />Coastal</label>
+              <label class="chip"><input type="checkbox" name="focus" value="biodiversity" />Biodiversity</label>
+            </div>
+          </div>
+          <div class="field full">
+            <label for="supporter_notes">Optional Notes</label>
+            <textarea
+              id="supporter_notes"
+              name="supporter_notes"
+              placeholder="What does long-term regenerative support mean in your context?"
+            ></textarea>
+          </div>
+          <div class="field full">
+            <label class="checkline">
+              <input type="checkbox" id="commit_hold" required />
+              <span>I commit to maintain my selected support horizon (holding or contribution).</span>
+            </label>
+            <label class="checkline">
+              <input type="checkbox" id="commit_proof" required />
+              <span>I commit to submit verifiable proof entries during campaign windows.</span>
+            </label>
+            <p class="subtle">
+              Minimum contact requirement: provide Telegram handle or contact email.
+            </p>
+          </div>
+          <div class="field full">
+            <div class="hero-cta-row">
+              <button class="btn btn-primary" type="submit">Save Supporter Profile</button>
+              <button class="btn" type="button" id="copy-optin-btn">Copy #supporter-optin</button>
+              <button class="btn" type="button" id="download-profile-btn">Download JSON</button>
+            </div>
+          </div>
+        </form>
+        <div id="form-message"></div>
+      </section>
+
+      <section class="section">
+        <h2>Current Profile Snapshot</h2>
+        <div class="kv-grid" id="profile-snapshot">
+          <article class="kv">
+            <div class="k">Supporter ID</div>
+            <div class="v mono" id="snapshot-supporter-id">-</div>
+          </article>
+          <article class="kv">
+            <div class="k">Telegram</div>
+            <div class="v" id="snapshot-telegram">-</div>
+          </article>
+          <article class="kv">
+            <div class="k">Contact Email</div>
+            <div class="v" id="snapshot-email">-</div>
+          </article>
+          <article class="kv">
+            <div class="k">Participation Mode</div>
+            <div class="v" id="snapshot-mode">-</div>
+          </article>
+          <article class="kv">
+            <div class="k">Offset Path</div>
+            <div class="v" id="snapshot-offset">-</div>
+          </article>
+          <article class="kv">
+            <div class="k">Wallet/Exchange Ref</div>
+            <div class="v mono" id="snapshot-identity">-</div>
+          </article>
+          <article class="kv">
+            <div class="k">Holding Horizon</div>
+            <div class="v" id="snapshot-horizon">-</div>
+          </article>
+          <article class="kv">
+            <div class="k">Monthly Support</div>
+            <div class="v" id="snapshot-support">-</div>
+          </article>
+          <article class="kv">
+            <div class="k">AI Cadence</div>
+            <div class="v" id="snapshot-cadence">-</div>
+          </article>
+          <article class="kv">
+            <div class="k">Local Ecosystem Context</div>
+            <div class="v" id="snapshot-local">-</div>
+          </article>
+        </div>
+        <div class="hero-cta-row" style="margin-top: 0.72rem;">
+          <a class="btn" href="./proof-page.html">Go to Proof Board</a>
+          <a
+            class="btn btn-primary"
+            href="https://www.coinstore.com/home"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Trade on Coinstore
+          </a>
+        </div>
+        <p class="fine-print">
+          Supporter opt-in is a participation pledge, not a return contract. No financial
+          guarantees are implied by this form.
+        </p>
+      </section>
+
+      <section class="section" id="campaign-rules">
+        <h2>Campaign Rules (Supporter Cycle)</h2>
+        <div class="grid-2">
+          <article class="panel">
+            <h3>Eligibility</h3>
+            <p>
+              1) Anyone can complete opt-in profile (holder or non-holder). 2) Complete one
+              qualified participation action. 3) Submit proof block with valid tx hash and
+              certificate URL.
+            </p>
+          </article>
+          <article class="panel">
+            <h3>Verification Standard</h3>
+            <p>
+              Proof must be publicly checkable. Duplicate artifacts or unverifiable references
+              are not eligible.
+            </p>
+          </article>
+          <article class="panel">
+            <h3>Conduct and Safety</h3>
+            <p>
+              No price promises, no financial advice, no private-key requests. Use only official links.
+            </p>
+          </article>
+          <article class="panel">
+            <h3>Dispute Handling</h3>
+            <p>
+              Ops team logs disputes daily. Technical lead verifies proof disputes against public records.
+            </p>
+          </article>
+        </div>
+        <div class="table-wrap" style="margin-top: 0.7rem;">
+          <table>
+            <thead>
+              <tr>
+                <th>Submission Block</th>
+                <th>Format</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">#supporter-optin</td>
+                <td class="mono">supporter_id, participation_mode, offset_path, telegram/contact_email, wallet_reference(optional), horizon_months, monthly_regen_usd, ai_prompt_cadence, local_ecosystem, stewardship_focus</td>
+              </tr>
+              <tr>
+                <td class="mono">#proof</td>
+                <td class="mono">supporter_id, retirement_id, tx_hash, certificate_url, note</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="./assets/regen-campaign.js"></script>
+    <script>
+      window.RegenCampaign.applyBrand();
+
+      const form = document.getElementById("supporter-form");
+      const formMessage = document.getElementById("form-message");
+      const copyOptinBtn = document.getElementById("copy-optin-btn");
+      const downloadProfileBtn = document.getElementById("download-profile-btn");
+      const field = (name) => form.elements.namedItem(name);
+      let activeProfile = null;
+
+      function setMessage(text) {
+        formMessage.className = "message";
+        formMessage.textContent = text;
+      }
+
+      function selectedFocusValues() {
+        return Array.from(document.querySelectorAll("input[name='focus']:checked"))
+          .map((node) => node.value);
+      }
+
+      function prefill(profile) {
+        if (!profile) return;
+        field("supporter_name").value = profile.supporterName || "";
+        field("telegram_handle").value = profile.telegramHandle || "";
+        field("contact_email").value = profile.contactEmail || "";
+        field("wallet_reference").value = profile.walletReference || "";
+        field("participation_mode").value = profile.participationMode || "hybrid";
+        field("offset_path").value = profile.offsetPath || "pooled_membership";
+        field("holding_horizon_months").value = String(
+          profile.holdingHorizonMonths || "12"
+        );
+        field("ai_prompt_cadence").value = profile.aiPromptCadence || "active";
+        field("monthly_regen_usd").value = String(profile.monthlyRegenUsd || "5");
+        field("local_ecosystem").value = profile.localEcosystem || "";
+        field("supporter_notes").value = profile.notes || "";
+
+        const focusSet = new Set(profile.stewardshipFocus || []);
+        document.querySelectorAll("input[name='focus']").forEach((node) => {
+          node.checked = focusSet.has(node.value);
+        });
+      }
+
+      function renderSnapshot(profile) {
+        const fallback = "-";
+        document.getElementById("snapshot-supporter-id").textContent =
+          profile?.supporterId || fallback;
+        document.getElementById("snapshot-telegram").textContent =
+          profile?.telegramHandle || fallback;
+        document.getElementById("snapshot-email").textContent =
+          profile?.contactEmail || fallback;
+        document.getElementById("snapshot-mode").textContent =
+          profile?.participationMode || fallback;
+        document.getElementById("snapshot-offset").textContent =
+          profile?.offsetPath || fallback;
+        document.getElementById("snapshot-identity").textContent =
+          profile?.walletReference || fallback;
+        document.getElementById("snapshot-horizon").textContent =
+          profile ? `${profile.holdingHorizonMonths} months` : fallback;
+        document.getElementById("snapshot-support").textContent =
+          profile ? `$${profile.monthlyRegenUsd}` : fallback;
+        document.getElementById("snapshot-cadence").textContent =
+          profile?.aiPromptCadence || fallback;
+        document.getElementById("snapshot-local").textContent =
+          profile?.localEcosystem || fallback;
+      }
+
+      function buildProfileFromForm() {
+        const focus = selectedFocusValues();
+        const supporterName = String(field("supporter_name").value || "").trim();
+        const telegramHandle = String(field("telegram_handle").value || "").trim();
+        const contactEmail = String(field("contact_email").value || "").trim();
+        const walletReference = String(field("wallet_reference").value || "").trim();
+        const participationMode = field("participation_mode").value;
+        const offsetPath = field("offset_path").value;
+        const identityRef = walletReference || contactEmail || telegramHandle || supporterName;
+        const profile = {
+          version: 1,
+          createdAt: new Date().toISOString(),
+          supporterId: window.RegenCampaign.makeSupporterId(supporterName, identityRef),
+          supporterName,
+          participationMode,
+          offsetPath,
+          telegramHandle,
+          contactEmail,
+          walletReference,
+          holdingHorizonMonths: Number(field("holding_horizon_months").value),
+          aiPromptCadence: field("ai_prompt_cadence").value,
+          monthlyRegenUsd: Number(field("monthly_regen_usd").value),
+          localEcosystem: String(field("local_ecosystem").value || "").trim(),
+          stewardshipFocus: focus,
+          notes: String(field("supporter_notes").value || "").trim(),
+        };
+        return profile;
+      }
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const profile = buildProfileFromForm();
+        if (!profile.telegramHandle && !profile.contactEmail) {
+          setMessage("Provide at least one contact method: Telegram handle or email.");
+          return;
+        }
+        if (
+          (profile.participationMode === "holder" || profile.participationMode === "hybrid") &&
+          !profile.walletReference
+        ) {
+          setMessage("Holder/hybrid mode requires wallet or exchange reference.");
+          return;
+        }
+        window.RegenCampaign.saveSupporterProfile(profile);
+        activeProfile = profile;
+        renderSnapshot(profile);
+        setMessage("Supporter profile saved. Copy your #supporter-optin block next.");
+      });
+
+      copyOptinBtn.addEventListener("click", async () => {
+        const profile = activeProfile || window.RegenCampaign.loadSupporterProfile();
+        if (!profile) {
+          setMessage("Save your supporter profile first.");
+          return;
+        }
+        const text = window.RegenCampaign.buildSupporterPost(profile);
+        await window.RegenCampaign.copyText(text);
+        setMessage("Copied #supporter-optin block to clipboard.");
+      });
+
+      downloadProfileBtn.addEventListener("click", () => {
+        const profile = activeProfile || window.RegenCampaign.loadSupporterProfile();
+        if (!profile) {
+          setMessage("Save your supporter profile first.");
+          return;
+        }
+        window.RegenCampaign.downloadJson(
+          `${profile.supporterId || "supporter-profile"}.json`,
+          profile
+        );
+        setMessage("Downloaded supporter profile JSON.");
+      });
+
+      const existing = window.RegenCampaign.loadSupporterProfile();
+      if (existing) {
+        activeProfile = existing;
+        prefill(existing);
+        renderSnapshot(existing);
+      } else {
+        renderSnapshot(null);
+      }
+    </script>
+  </body>
+</html>
