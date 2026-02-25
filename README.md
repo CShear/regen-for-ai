@@ -131,6 +131,16 @@ npm run typecheck # Type checking
 regen-for-ai --help  # CLI usage
 ```
 
+## Release
+
+`v0.3.0` publish flow is automated by GitHub Actions:
+
+1. Confirm `package.json` version is the target release version.
+2. Push a tag matching package version, e.g. `v0.3.0`.
+3. `publish-npm.yml` verifies typecheck/build and publishes to npm with provenance.
+
+Manual fallback is available via `workflow_dispatch` for recoverable release retries.
+
 ## Roadmap
 
 | Phase | Status |
