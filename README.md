@@ -126,8 +126,11 @@ cd regen-for-ai
 npm install
 cp .env.example .env
 npm run dev       # Watch mode with hot reload
+npm run lint      # ESLint checks
+npm test          # Vitest unit tests
 npm run build     # Production build
 npm run typecheck # Type checking
+npm run verify    # Typecheck + lint + test + build
 regen-for-ai --help  # CLI usage
 ```
 
