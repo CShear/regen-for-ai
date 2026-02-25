@@ -21,6 +21,60 @@ import {
   isEvmWalletConfigured,
   getEvmAddress,
 } from "./services/evm-wallet.js";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+// Handle --help and --version before starting the server
+const args = process.argv.slice(2);
+
+if (args.includes("--help") || args.includes("-h")) {
+  console.log(`Regen for AI — Verified ecological accountability for AI compute
+
+USAGE:
+  npx regen-for-ai              Start the MCP server (stdio transport)
+  regen-for-ai --help           Show this help message
+  regen-for-ai --version        Show version
+
+INSTALL (Claude Code):
+  claude mcp add -s user regen-for-ai -- npx regen-for-ai
+
+MCP TOOLS:
+  estimate_session_footprint    Estimate your AI session's ecological footprint
+  browse_available_credits      Browse ecocredits on Regen Marketplace
+  retire_credits                Retire credits (on-chain or marketplace link)
+  get_retirement_certificate    Verify a retirement on-chain
+  get_impact_summary            Regen Network aggregate impact stats
+  browse_ecobridge_tokens       List cross-chain payment tokens (when enabled)
+  retire_via_ecobridge          Pay with any token via ecoBridge (when enabled)
+
+CONFIGURATION:
+  Copy .env.example to .env to customize. The server works without any
+  configuration — read-only tools (footprint, browsing, impact) need no keys.
+
+  Optional:
+    REGEN_WALLET_MNEMONIC       Enable direct on-chain retirement
+    ECOBRIDGE_EVM_MNEMONIC      Enable cross-chain payment via ecoBridge
+    ECOBRIDGE_ENABLED=false     Disable ecoBridge tools
+
+  See .env.example for all options.
+
+DOCUMENTATION:
+  https://github.com/CShear/regen-for-ai`);
+  process.exit(0);
+}
+
+if (args.includes("--version") || args.includes("-v")) {
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf8"));
+    console.log(pkg.version);
+  } catch {
+    console.log("0.3.0");
+  }
+  process.exit(0);
+}
 
 // Load config early so isWalletConfigured() is available for annotations
 loadConfig();
