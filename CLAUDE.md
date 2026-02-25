@@ -117,3 +117,40 @@ src/
 - Tool descriptions should include trigger language ("Use this when...") — Claude reads them as context
 - Config via environment variables (dotenv in dev, system env in production)
 - `isWalletConfigured()` from `config.ts` is the single gate for all conditional behavior
+
+## Collaboration & Issue Workflow
+
+This project uses GitHub Issues as the task backlog. Read `ROADMAP.md` for the full strategic context.
+
+### For AI assistants analyzing this repo
+
+When a collaborator asks you to understand what's needed:
+1. Read this file (CLAUDE.md) for technical context
+2. Read ROADMAP.md for strategic context and the 3-track rollout plan
+3. Run `gh issue list --label "priority:critical"` to see what's most urgent
+4. Issues are organized by:
+   - **Track**: `track-a` (developer community), `track-b` (subscriptions), `track-c` (enterprise)
+   - **Sprint**: `sprint:weeks-1-2` through `sprint:weeks-9-12`
+   - **Priority**: `priority:critical` > `priority:high` > `priority:medium`
+   - **Type**: `infra`, `design`, `documentation`, `enhancement`
+5. Each issue has acceptance criteria as a checklist
+6. Check issue comments for dependency notes (e.g., "Depends on #6")
+
+### Key dependencies (critical path)
+
+```
+#5 Polish MCP ──┐
+#8 Certificate ─┤──→ #18 Community seeding ──→ #12 Blog + #15 Demo
+#21 Publish npm ┘
+                     #6 Stripe ──→ #9 Pool accounting ──→ #11 Email flow
+                                                       ──→ #17 Dashboard
+                                                       ──→ #20 REGEN burn
+                                                       ──→ #14 Dev API
+#4 Anthropic pitch (parallel, starts Week 1)
+#13 Credit supply (parallel, starts Week 1)
+```
+
+### Branch conventions
+- Feature branches: `feature/<issue-number>-short-description`
+- Bug fixes: `fix/<issue-number>-short-description`
+- Reference the issue number in commit messages and PR descriptions

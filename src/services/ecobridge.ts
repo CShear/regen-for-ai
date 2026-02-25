@@ -393,7 +393,7 @@ export async function pollTransaction(
   maxAttempts = 60,
   intervalMs = 5000
 ): Promise<EcoBridgeTransaction> {
-  const terminalStates = new Set(["RETIRED", "RWI_MINTED", "FEE_CALCULATED", "FAILED", "ERROR"]);
+  const terminalStates = new Set(["RETIRED", "RWI_MINTED", "RWI_QUEUED", "FEE_CALCULATED", "FAILED", "ERROR"]);
 
   for (let i = 0; i < maxAttempts; i++) {
     try {
