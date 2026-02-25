@@ -21,9 +21,6 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "verify": "npm run typecheck && npm run lint && npm test && npm run build",
-    "gtm:preflight": "node docs/listing-gtm/scripts/preflight-check.mjs",
-    "gtm:preflight:strict": "node docs/listing-gtm/scripts/preflight-check.mjs --strict-urls",
-    "gtm:bundle": "node docs/listing-gtm/scripts/create-release-bundle.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
