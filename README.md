@@ -126,10 +126,24 @@ cd regen-for-ai
 npm install
 cp .env.example .env
 npm run dev       # Watch mode with hot reload
+npm run lint      # ESLint checks
+npm test          # Vitest unit tests
 npm run build     # Production build
 npm run typecheck # Type checking
+npm run verify    # Typecheck + lint + test + build
 regen-for-ai --help  # CLI usage
 ```
+
+## Release
+
+`v0.3.0` publish flow is automated by GitHub Actions:
+
+1. Ensure `main` is green (`ci.yml` passes typecheck/lint/test/build).
+2. Confirm `package.json` version is the target release version.
+3. Push a tag matching package version, e.g. `v0.3.0`.
+4. `publish-npm.yml` verifies the build and publishes to npm with provenance.
+
+Manual fallback is available via `workflow_dispatch` for recoverable release retries.
 
 ## Roadmap
 

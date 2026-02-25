@@ -28,8 +28,20 @@ Thank you for your interest in contributing! This project connects AI compute us
 npm run dev       # Watch mode — auto-restarts on file changes
 npm run typecheck # Check types without emitting
 npm run lint      # Run linter
+npm test          # Run unit tests
 npm run build     # Production build to dist/
+npm run verify    # Typecheck + lint + test + build
 ```
+
+## npm Release Workflow
+
+- Release publishing is automated by `.github/workflows/publish-npm.yml`.
+- Trigger via version tag push (e.g., `v0.3.0`) or `workflow_dispatch`.
+- The workflow enforces:
+  - `npm run verify` passes,
+  - tag version matches `package.json` version,
+  - publish uses npm provenance.
+- Required secret: `NPM_TOKEN` (maintainer-owned).
 
 ## Issue Workflow
 
