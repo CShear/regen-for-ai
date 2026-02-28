@@ -3,6 +3,7 @@
 **Add Regenerative AI to your Claude Code in 30 seconds.**
 
 [![npm version](https://img.shields.io/npm/v/regen-for-ai)](https://www.npmjs.com/package/regen-for-ai)
+[![CI](https://github.com/CShear/regen-for-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/CShear/regen-for-ai/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-compatible-blue)](https://modelcontextprotocol.io)
 
@@ -120,16 +121,50 @@ Pre-built workflows you can invoke:
 
 ## Development
 
+### Local setup
+
 ```bash
 git clone https://github.com/CShear/regen-for-ai.git
 cd regen-for-ai
 npm install
-cp .env.example .env
-npm run dev       # Watch mode with hot reload
-npm run build     # Production build
-npm run typecheck # Type checking
-regen-for-ai --help  # CLI usage
+cp .env.example .env  # fill in your keys (optional — read-only tools work without)
+npm run build
 ```
+
+### Connect to Claude Code (local build)
+
+Point your MCP config at the local build so changes are reflected immediately:
+
+```bash
+claude mcp add regen-for-ai -s user -- node /path/to/regen-for-ai/dist/index.js
+```
+
+To enable ecoBridge tools locally:
+
+```bash
+claude mcp add regen-for-ai -s user \
+  --env ECOBRIDGE_ENABLED=true \
+  -- node /path/to/regen-for-ai/dist/index.js
+```
+
+### Scripts
+
+| Command | What it does |
+|---------|-------------|
+| `npm run dev` | Watch mode with hot reload (tsx) |
+| `npm run build` | Production build (tsc) |
+| `npm run typecheck` | Type checking only |
+| `npm test` | Run test suite (vitest) |
+| `npm run test:watch` | Run tests in watch mode |
+
+### Running tests
+
+```bash
+npm test              # single run
+npm run test:watch    # re-run on file changes
+```
+
+Tests mock all external APIs (RPC providers, ecoBridge, Regen Ledger) — no network calls, no wallets needed.
 
 ## Roadmap
 
