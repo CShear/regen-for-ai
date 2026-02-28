@@ -34,6 +34,7 @@ if (args.includes("--help") || args.includes("-h")) {
 USAGE:
   npx regen-for-ai              Start the MCP server (stdio transport)
   npx regen-for-ai serve        Start the payment & balance web server
+  npx regen-for-ai pool-run     Execute monthly pool retirement batch
   regen-for-ai --help           Show this help message
   regen-for-ai --version        Show version
 
@@ -53,6 +54,12 @@ PAYMENT SERVER:
   npx regen-for-ai serve [--port 3141]
   Runs the Stripe Checkout + balance API server.
   Requires STRIPE_SECRET_KEY in environment.
+
+POOL RETIREMENT:
+  npx regen-for-ai pool-run [--dry-run]
+  Executes monthly batch retirement from subscription pool.
+  Use --dry-run to calculate without broadcasting transactions.
+  Requires REGEN_WALLET_MNEMONIC for live runs.
 
 CONFIGURATION:
   Copy .env.example to .env to customize. The server works without any
@@ -89,6 +96,23 @@ if (args[0] === "serve") {
   const portIdx = args.indexOf("--port");
   const port = portIdx !== -1 ? parseInt(args[portIdx + 1], 10) : undefined;
   import("./server/index.js").then(({ startServer }) => startServer({ port }));
+} else if (args[0] === "pool-run") {
+  // Handle "pool-run" subcommand — execute monthly pool retirement
+  const dryRun = args.includes("--dry-run");
+  import("./services/pool.js").then(async ({ executePoolRun, formatPoolRunResult }) => {
+    try {
+      console.log(dryRun ? "Executing pool run (DRY RUN)..." : "Executing pool run...");
+      const result = await executePoolRun({ dryRun });
+      console.log(formatPoolRunResult(result));
+      console.log("\nJSON output:");
+      console.log(JSON.stringify(result, (_k, v) => typeof v === "bigint" ? v.toString() : v, 2));
+      process.exit(result.status === "failed" ? 1 : 0);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Pool run failed: ${msg}`);
+      process.exit(1);
+    }
+  });
 } else {
 
 // Load config early so isWalletConfigured() is available for annotations

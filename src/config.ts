@@ -31,6 +31,11 @@ export interface Config {
   // Prepaid balance (credit card top-up via Stripe)
   balanceApiKey: string | undefined;
   balanceUrl: string | undefined;
+
+  // Stripe Payment Links (subscription tiers)
+  stripePaymentLinkSeedling: string;
+  stripePaymentLinkGrove: string;
+  stripePaymentLinkForest: string;
 }
 
 let _config: Config | undefined;
@@ -68,6 +73,10 @@ export function loadConfig(): Config {
 
     balanceApiKey: process.env.REGEN_API_KEY || undefined,
     balanceUrl: process.env.REGEN_BALANCE_URL || undefined,
+
+    stripePaymentLinkSeedling: process.env.STRIPE_PAYMENT_LINK_SEEDLING || "#",
+    stripePaymentLinkGrove: process.env.STRIPE_PAYMENT_LINK_GROVE || "#",
+    stripePaymentLinkForest: process.env.STRIPE_PAYMENT_LINK_FOREST || "#",
   };
 
   return _config;

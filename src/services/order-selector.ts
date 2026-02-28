@@ -30,7 +30,8 @@ export interface SelectedOrder {
 export async function selectBestOrders(
   creditType: string | undefined,
   quantity: number,
-  preferredDenom?: string
+  preferredDenom?: string,
+  creditTypeAbbrevs?: string[]
 ): Promise<OrderSelection> {
   const [sellOrders, classes, allowedDenoms] = await Promise.all([
     listSellOrders(),
@@ -56,14 +57,20 @@ export async function selectBestOrders(
     if (order.disable_auto_retire) return false;
     if (order.ask_denom !== denomInfo.bankDenom) return false;
 
-    if (creditType) {
+    if (creditType || creditTypeAbbrevs) {
       // Extract class ID from batch denom (e.g., "C01-001-..." → "C01")
       const classId = order.batch_denom.split("-").slice(0, 1).join("");
       // Match on credit type abbreviation
       const abbrev = classTypeMap.get(classId);
       if (!abbrev) return false;
-      if (creditType === "carbon" && abbrev !== "C") return false;
-      if (creditType === "biodiversity" && abbrev === "C") return false;
+
+      if (creditTypeAbbrevs) {
+        // Explicit abbreviation filter takes precedence
+        if (!creditTypeAbbrevs.includes(abbrev)) return false;
+      } else if (creditType) {
+        if (creditType === "carbon" && abbrev !== "C") return false;
+        if (creditType === "biodiversity" && abbrev === "C") return false;
+      }
     }
 
     if (order.expiration) {

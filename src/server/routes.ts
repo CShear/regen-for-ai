@@ -1,6 +1,7 @@
 /**
  * Express routes for the Regen for AI payment service.
  *
+ * GET  /                  — Subscription landing page with live stats
  * POST /checkout          — Create a Stripe Checkout session
  * POST /webhook           — Handle Stripe webhook events
  * GET  /balance           — Check prepaid balance (API key in header)
@@ -11,6 +12,8 @@
 import { Router, Request, Response } from "express";
 import Stripe from "stripe";
 import type Database from "better-sqlite3";
+import type { Config } from "../config.js";
+import { getNetworkStats, type NetworkStats } from "../services/indexer.js";
 import {
   getUserByApiKey,
   getUserByEmail,
@@ -18,12 +21,355 @@ import {
   creditBalance,
   debitBalance,
   getTransactions,
+  getSubscriberByStripeId,
+  createSubscriber,
+  updateSubscriber,
+  updateSubscriberStatus,
 } from "./db.js";
 
-export function createRoutes(stripe: Stripe, db: Database.Database, baseUrl: string): Router {
+// 5-minute in-memory cache for network stats
+let statsCache: { data: NetworkStats; fetchedAt: number } | null = null;
+const STATS_CACHE_TTL = 300_000;
+
+async function getCachedStats(): Promise<NetworkStats | null> {
+  if (statsCache && Date.now() - statsCache.fetchedAt < STATS_CACHE_TTL) {
+    return statsCache.data;
+  }
+  try {
+    const data = await getNetworkStats();
+    statsCache = { data, fetchedAt: Date.now() };
+    return data;
+  } catch {
+    return statsCache?.data ?? null;
+  }
+}
+
+export function createRoutes(stripe: Stripe, db: Database.Database, baseUrl: string, config?: Config): Router {
   const router = Router();
 
   // --- Public routes ---
+
+  /**
+   * GET /
+   * Subscription landing page with live impact stats.
+   */
+  router.get("/", async (_req: Request, res: Response) => {
+    const seedlingUrl = config?.stripePaymentLinkSeedling ?? process.env.STRIPE_PAYMENT_LINK_SEEDLING ?? "#";
+    const groveUrl = config?.stripePaymentLinkGrove ?? process.env.STRIPE_PAYMENT_LINK_GROVE ?? "#";
+    const forestUrl = config?.stripePaymentLinkForest ?? process.env.STRIPE_PAYMENT_LINK_FOREST ?? "#";
+
+    const stats = await getCachedStats();
+    const totalRetirements = stats ? stats.totalRetirements.toLocaleString() : "--";
+    const totalOrders = stats ? stats.totalOrders.toLocaleString() : "--";
+
+    res.setHeader("Content-Type", "text/html");
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Regen for AI — Regenerative AI</title>
+  <meta name="description" content="Fund verified ecological regeneration from your AI sessions. Monthly subscriptions retire real carbon and biodiversity credits on Regen Network.">
+  <meta property="og:title" content="Regen for AI — Regenerative AI">
+  <meta property="og:description" content="Fund verified ecological regeneration from your AI sessions. Monthly subscriptions retire real carbon and biodiversity credits on Regen Network.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="${baseUrl}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Regen for AI — Regenerative AI">
+  <meta name="twitter:description" content="Fund verified ecological regeneration from your AI sessions.">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, system-ui, 'Segoe UI', sans-serif;
+      margin: 0; padding: 0;
+      color: #1a1a1a; line-height: 1.6;
+      background: #fff;
+    }
+    .container { max-width: 900px; margin: 0 auto; padding: 0 24px; }
+
+    /* Hero */
+    .hero {
+      padding: 80px 0 60px;
+      text-align: center;
+    }
+    .hero-label {
+      display: inline-block;
+      font-size: 13px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+      color: #2d6a4f; background: #f0f7f4;
+      padding: 4px 12px; border-radius: 20px; margin-bottom: 16px;
+    }
+    .hero h1 {
+      font-size: 42px; font-weight: 700; color: #1a1a1a;
+      margin: 0 0 16px; line-height: 1.15;
+    }
+    .hero h1 span { color: #2d6a4f; }
+    .hero p {
+      font-size: 18px; color: #555; max-width: 600px; margin: 0 auto 32px;
+    }
+    .cta-btn {
+      display: inline-block; padding: 14px 32px;
+      background: #2d6a4f; color: #fff;
+      font-size: 16px; font-weight: 600;
+      border-radius: 8px; text-decoration: none;
+      transition: background 0.2s;
+    }
+    .cta-btn:hover { background: #1b4332; }
+
+    /* How it works */
+    .how-it-works {
+      padding: 60px 0;
+      border-top: 1px solid #e8e8e8;
+    }
+    .section-title {
+      text-align: center; font-size: 28px; font-weight: 700;
+      margin: 0 0 40px; color: #1a1a1a;
+    }
+    .steps {
+      display: flex; gap: 24px; flex-wrap: wrap;
+      justify-content: center;
+    }
+    .step {
+      flex: 1 1 180px; max-width: 200px;
+      text-align: center; padding: 0 8px;
+    }
+    .step-num {
+      width: 40px; height: 40px; line-height: 40px;
+      border-radius: 50%; background: #2d6a4f; color: #fff;
+      font-size: 18px; font-weight: 700;
+      margin: 0 auto 12px;
+    }
+    .step h3 { font-size: 16px; margin: 0 0 6px; color: #1a1a1a; }
+    .step p { font-size: 13px; color: #666; margin: 0; }
+    .step code {
+      font-size: 11px; background: #f4f4f4; padding: 2px 5px;
+      border-radius: 3px; word-break: break-all;
+    }
+
+    /* Pricing */
+    .pricing {
+      padding: 60px 0;
+      background: #fafcfb;
+      border-top: 1px solid #e8e8e8;
+    }
+    .tiers {
+      display: flex; gap: 20px; flex-wrap: wrap;
+      justify-content: center;
+    }
+    .tier {
+      flex: 1 1 240px; max-width: 280px;
+      background: #fff; border: 2px solid #e0e0e0; border-radius: 12px;
+      padding: 32px 24px; text-align: center;
+      text-decoration: none; color: #1a1a1a;
+      transition: border-color 0.2s, box-shadow 0.2s;
+      display: flex; flex-direction: column;
+    }
+    .tier:hover {
+      border-color: #2d6a4f;
+      box-shadow: 0 4px 20px rgba(45, 106, 79, 0.1);
+    }
+    .tier.featured {
+      border-color: #2d6a4f;
+      position: relative;
+    }
+    .tier-badge {
+      position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+      background: #2d6a4f; color: #fff;
+      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 4px 14px; border-radius: 20px; white-space: nowrap;
+    }
+    .tier-name { font-size: 20px; font-weight: 700; color: #2d6a4f; margin-bottom: 4px; }
+    .tier-price { font-size: 36px; font-weight: 700; margin: 8px 0 4px; }
+    .tier-price span { font-size: 16px; font-weight: 400; color: #888; }
+    .tier-desc {
+      font-size: 14px; color: #666; margin: 12px 0 20px;
+      flex-grow: 1;
+    }
+    .tier-btn {
+      display: block; padding: 12px 0;
+      background: #2d6a4f; color: #fff;
+      font-size: 15px; font-weight: 600;
+      border-radius: 8px; text-decoration: none;
+      transition: background 0.2s;
+    }
+    .tier-btn:hover { background: #1b4332; }
+
+    /* Stats */
+    .stats {
+      padding: 48px 0;
+      border-top: 1px solid #e8e8e8;
+    }
+    .stats-bar {
+      display: flex; gap: 40px; flex-wrap: wrap;
+      justify-content: center; text-align: center;
+    }
+    .stat-item {}
+    .stat-num {
+      font-size: 36px; font-weight: 700; color: #2d6a4f;
+      line-height: 1.1;
+    }
+    .stat-label { font-size: 14px; color: #888; margin-top: 4px; }
+
+    /* Trust */
+    .trust {
+      padding: 60px 0;
+      border-top: 1px solid #e8e8e8;
+    }
+    .trust-grid {
+      display: flex; gap: 32px; flex-wrap: wrap;
+      justify-content: center;
+    }
+    .trust-item {
+      flex: 1 1 220px; max-width: 260px;
+    }
+    .trust-item h3 { font-size: 16px; margin: 0 0 6px; color: #2d6a4f; }
+    .trust-item p { font-size: 14px; color: #666; margin: 0; }
+
+    /* Footer */
+    .footer {
+      padding: 48px 0;
+      text-align: center;
+      border-top: 1px solid #e8e8e8;
+    }
+    .footer p { font-size: 14px; color: #888; margin: 12px 0; }
+    .footer a { color: #2d6a4f; text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+
+    /* Mobile */
+    @media (max-width: 700px) {
+      .hero { padding: 48px 0 40px; }
+      .hero h1 { font-size: 28px; }
+      .hero p { font-size: 16px; }
+      .step { flex: 1 1 140px; }
+      .tier { flex: 1 1 100%; max-width: 100%; }
+      .stats-bar { gap: 24px; }
+      .stat-num { font-size: 28px; }
+      .trust-item { flex: 1 1 100%; max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-label">Regenerative AI</div>
+      <h1>Fund <span>Ecological Regeneration</span> from Your AI Sessions</h1>
+      <p>Regenerative contribution, not carbon offset. Monthly subscriptions retire verified carbon and biodiversity credits on Regen Network.</p>
+      <a class="cta-btn" href="#pricing">Choose Your Plan</a>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="how-it-works">
+    <div class="container">
+      <h2 class="section-title">How It Works</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <h3>Install</h3>
+          <p>One command:<br><code>claude mcp add regen-for-ai</code></p>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <h3>Estimate</h3>
+          <p>AI estimates your session's ecological footprint</p>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <h3>Subscribe</h3>
+          <p>Pick a monthly tier that funds ongoing regeneration</p>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <h3>Retire</h3>
+          <p>Credits retired on-chain monthly with verifiable proof</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section class="pricing" id="pricing">
+    <div class="container">
+      <h2 class="section-title">Choose Your Plan</h2>
+      <div class="tiers">
+        <div class="tier">
+          <div class="tier-name">Seedling</div>
+          <div class="tier-price">$2<span>/mo</span></div>
+          <div class="tier-desc">~0.5 carbon credits retired per month. Perfect for individual developers.</div>
+          <a class="tier-btn" href="${seedlingUrl}">Subscribe</a>
+        </div>
+        <div class="tier featured">
+          <div class="tier-badge">Most Popular</div>
+          <div class="tier-name">Grove</div>
+          <div class="tier-price">$5<span>/mo</span></div>
+          <div class="tier-desc">~1 carbon credit + 0.5 biodiversity credits per month. The sweet spot.</div>
+          <a class="tier-btn" href="${groveUrl}">Subscribe</a>
+        </div>
+        <div class="tier">
+          <div class="tier-name">Forest</div>
+          <div class="tier-price">$10<span>/mo</span></div>
+          <div class="tier-desc">~2.5 carbon credits + 1 biodiversity credit per month. For teams and power users.</div>
+          <a class="tier-btn" href="${forestUrl}">Subscribe</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Live Stats -->
+  <section class="stats">
+    <div class="container">
+      <h2 class="section-title">Live from Regen Network</h2>
+      <div class="stats-bar">
+        <div class="stat-item">
+          <div class="stat-num">${totalRetirements}</div>
+          <div class="stat-label">Total Retirements</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-num">${totalOrders}</div>
+          <div class="stat-label">Marketplace Orders</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-num">5</div>
+          <div class="stat-label">Credit Types</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Trust -->
+  <section class="trust">
+    <div class="container">
+      <h2 class="section-title">Why Regen for AI</h2>
+      <div class="trust-grid">
+        <div class="trust-item">
+          <h3>Verified On-Chain</h3>
+          <p>Every retirement is recorded immutably on Regen Ledger. No double-counting, no greenwashing.</p>
+        </div>
+        <div class="trust-item">
+          <h3>Not Carbon Offset</h3>
+          <p>Regenerative contribution funds real ecological projects — carbon, biodiversity, and beyond.</p>
+        </div>
+        <div class="trust-item">
+          <h3>Open Source</h3>
+          <p>Full transparency. Inspect the MCP server, verify the retirements, audit the code yourself.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <section class="footer">
+    <div class="container">
+      <a class="cta-btn" href="#pricing">Choose Your Plan</a>
+      <p>Powered by <a href="https://regen.network">Regen Network</a></p>
+      <p><a href="https://github.com/CShear/regen-for-ai">GitHub</a></p>
+    </div>
+  </section>
+
+</body>
+</html>`);
+  });
 
   /**
    * POST /checkout
@@ -122,6 +468,15 @@ export function createRoutes(stripe: Stripe, db: Database.Database, baseUrl: str
       console.log(
         `Balance credited: user=${user.id} amount=$${(amountCents / 100).toFixed(2)} balance=$${((user.balance_cents + amountCents) / 100).toFixed(2)}`
       );
+    } else if (event.type === "customer.subscription.created") {
+      const sub = event.data.object as Stripe.Subscription;
+      handleSubscriptionCreated(db, sub, stripe);
+    } else if (event.type === "customer.subscription.updated") {
+      const sub = event.data.object as Stripe.Subscription;
+      handleSubscriptionUpdated(db, sub);
+    } else if (event.type === "customer.subscription.deleted") {
+      const sub = event.data.object as Stripe.Subscription;
+      handleSubscriptionDeleted(db, sub);
     }
 
     res.json({ received: true });
@@ -239,9 +594,9 @@ export REGEN_BALANCE_URL=${baseUrl}</pre>
    * Payment Links are configured via STRIPE_PAYMENT_LINK_* env vars.
    */
   router.get("/checkout-page", (_req: Request, res: Response) => {
-    const seedlingUrl = process.env.STRIPE_PAYMENT_LINK_SEEDLING ?? "#";
-    const groveUrl = process.env.STRIPE_PAYMENT_LINK_GROVE ?? "#";
-    const forestUrl = process.env.STRIPE_PAYMENT_LINK_FOREST ?? "#";
+    const seedlingUrl = config?.stripePaymentLinkSeedling ?? process.env.STRIPE_PAYMENT_LINK_SEEDLING ?? "#";
+    const groveUrl = config?.stripePaymentLinkGrove ?? process.env.STRIPE_PAYMENT_LINK_GROVE ?? "#";
+    const forestUrl = config?.stripePaymentLinkForest ?? process.env.STRIPE_PAYMENT_LINK_FOREST ?? "#";
 
     res.setHeader("Content-Type", "text/html");
     res.send(`<!DOCTYPE html>
@@ -401,4 +756,97 @@ function authenticateRequest(req: Request, res: Response, db: Database.Database)
   }
 
   return user;
+}
+
+/** Map Stripe subscription amount to plan name */
+function amountToPlan(amountCents: number): "seedling" | "grove" | "forest" {
+  if (amountCents <= 200) return "seedling";
+  if (amountCents <= 500) return "grove";
+  return "forest";
+}
+
+/** Map Stripe subscription status to our subscriber status */
+function stripeStatusToLocal(status: string): "active" | "paused" | "cancelled" {
+  if (status === "active" || status === "trialing") return "active";
+  if (status === "paused") return "paused";
+  return "cancelled";
+}
+
+async function handleSubscriptionCreated(db: Database.Database, sub: Stripe.Subscription, stripe: Stripe) {
+  try {
+    const stripeSubId = sub.id;
+    const existing = getSubscriberByStripeId(db, stripeSubId);
+    if (existing) return; // Already processed
+
+    // Get customer email to find/create user
+    const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
+    let email: string | null = null;
+    if (customerId) {
+      try {
+        const customer = await stripe.customers.retrieve(customerId);
+        if (customer && !customer.deleted) {
+          email = (customer as Stripe.Customer).email;
+        }
+      } catch { /* ignore */ }
+    }
+
+    let user = email ? getUserByEmail(db, email) : undefined;
+    if (!user) {
+      user = createUser(db, email, customerId ?? null);
+      console.log(`New user created for subscription: ${user.api_key} (${email})`);
+    }
+
+    const amountCents = sub.items?.data?.[0]?.price?.unit_amount ?? 0;
+    const plan = amountToPlan(amountCents);
+    const periodStart = (sub as unknown as Record<string, unknown>).current_period_start
+      ? new Date(((sub as unknown as Record<string, unknown>).current_period_start as number) * 1000).toISOString()
+      : undefined;
+    const periodEnd = (sub as unknown as Record<string, unknown>).current_period_end
+      ? new Date(((sub as unknown as Record<string, unknown>).current_period_end as number) * 1000).toISOString()
+      : undefined;
+
+    createSubscriber(db, user.id, stripeSubId, plan, amountCents, periodStart, periodEnd);
+    console.log(`Subscription created: ${stripeSubId} plan=${plan} amount=$${(amountCents / 100).toFixed(2)}`);
+  } catch (err) {
+    console.error("Error handling subscription.created:", err instanceof Error ? err.message : err);
+  }
+}
+
+function handleSubscriptionUpdated(db: Database.Database, sub: Stripe.Subscription) {
+  try {
+    const stripeSubId = sub.id;
+    const existing = getSubscriberByStripeId(db, stripeSubId);
+    if (!existing) return; // Not tracked
+
+    const amountCents = sub.items?.data?.[0]?.price?.unit_amount ?? existing.amount_cents;
+    const plan = amountToPlan(amountCents);
+    const status = stripeStatusToLocal(sub.status);
+    const periodStart = (sub as unknown as Record<string, unknown>).current_period_start
+      ? new Date(((sub as unknown as Record<string, unknown>).current_period_start as number) * 1000).toISOString()
+      : undefined;
+    const periodEnd = (sub as unknown as Record<string, unknown>).current_period_end
+      ? new Date(((sub as unknown as Record<string, unknown>).current_period_end as number) * 1000).toISOString()
+      : undefined;
+
+    updateSubscriber(db, stripeSubId, {
+      plan,
+      amount_cents: amountCents,
+      status,
+      current_period_start: periodStart,
+      current_period_end: periodEnd,
+    });
+    console.log(`Subscription updated: ${stripeSubId} plan=${plan} status=${status}`);
+  } catch (err) {
+    console.error("Error handling subscription.updated:", err instanceof Error ? err.message : err);
+  }
+}
+
+function handleSubscriptionDeleted(db: Database.Database, sub: Stripe.Subscription) {
+  try {
+    const stripeSubId = sub.id;
+    updateSubscriberStatus(db, stripeSubId, "cancelled");
+    console.log(`Subscription cancelled: ${stripeSubId}`);
+  } catch (err) {
+    console.error("Error handling subscription.deleted:", err instanceof Error ? err.message : err);
+  }
 }

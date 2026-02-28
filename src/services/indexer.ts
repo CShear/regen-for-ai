@@ -220,6 +220,22 @@ export async function waitForRetirement(
   return null;
 }
 
+export interface NetworkStats {
+  totalRetirements: number;
+  totalOrders: number;
+}
+
+export async function getNetworkStats(): Promise<NetworkStats> {
+  const [retirements, orders] = await Promise.all([
+    getRetirementStats(),
+    getOrderStats(),
+  ]);
+  return {
+    totalRetirements: retirements.totalRetirements,
+    totalOrders: orders.totalOrders,
+  };
+}
+
 export async function getOrderStats(): Promise<{ totalOrders: number }> {
   const query = `
     query OrderStats {
