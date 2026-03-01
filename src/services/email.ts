@@ -399,8 +399,9 @@ export async function sendMonthlyEmails(
   const certificateUrl = pickCertificateUrl(result, serverUrl);
   const txHashes = collectTxHashes(result);
 
-  // Stripe Customer Portal URL (subscribers manage their own subscriptions)
-  const manageUrl = `https://billing.stripe.com/p/login/test`;
+  // Per-subscriber manage URL — routes through our /manage endpoint which
+  // creates a Stripe Billing Portal session dynamically.
+  // Each subscriber gets their own URL with their email for lookup.
 
   const runDate = new Date().toLocaleDateString("en-US", {
     year: "numeric",
@@ -415,6 +416,7 @@ export async function sendMonthlyEmails(
     if (!attr) continue;
 
     const cumulative = getCumulativeAttribution(db, sub.subscriber_id);
+    const manageUrl = `${serverUrl}/manage?email=${encodeURIComponent(sub.user_email)}`;
 
     const emailData: EmailData = {
       email: sub.user_email,

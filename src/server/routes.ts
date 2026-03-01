@@ -4,6 +4,7 @@
  * GET  /                  — Subscription landing page with live stats
  * POST /checkout          — Create a Stripe Checkout session
  * POST /webhook           — Handle Stripe webhook events
+ * GET  /manage            — Redirect to Stripe Customer Portal (subscription self-management)
  * GET  /balance           — Check prepaid balance (API key in header)
  * POST /debit             — Debit balance after retirement (API key in header)
  * GET  /transactions      — Transaction history (API key in header)
@@ -477,6 +478,9 @@ export function createRoutes(stripe: Stripe, db: Database.Database, baseUrl: str
     } else if (event.type === "customer.subscription.deleted") {
       const sub = event.data.object as Stripe.Subscription;
       handleSubscriptionDeleted(db, sub);
+    } else if (event.type === "invoice.paid") {
+      const invoice = event.data.object as Stripe.Invoice;
+      handleInvoicePaid(db, invoice);
     }
 
     res.json({ received: true });
@@ -654,6 +658,41 @@ export REGEN_BALANCE_URL=${baseUrl}</pre>
   </ol>
 </body>
 </html>`);
+  });
+
+  /**
+   * GET /manage?email=user@example.com
+   * Creates a Stripe Billing Portal session for subscription self-management
+   * (upgrade, downgrade, cancel, update payment method) and redirects to it.
+   */
+  router.get("/manage", async (req: Request, res: Response) => {
+    try {
+      const email = req.query.email as string | undefined;
+
+      if (!email) {
+        res.status(400).send("Missing email parameter. Use: /manage?email=you@example.com");
+        return;
+      }
+
+      // Look up user to get their Stripe customer ID
+      const user = getUserByEmail(db, email);
+      if (!user || !user.stripe_customer_id) {
+        res.status(404).send("No subscription found for this email. If you just subscribed, try again in a few seconds.");
+        return;
+      }
+
+      const returnUrl = config?.stripePortalReturnUrl ?? baseUrl;
+      const portalSession = await stripe.billingPortal.sessions.create({
+        customer: user.stripe_customer_id,
+        return_url: returnUrl,
+      });
+
+      res.redirect(303, portalSession.url);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Manage portal error:", msg);
+      res.status(500).send("Error creating subscription management session. Please try again.");
+    }
   });
 
   // --- Authenticated routes (API key in header) ---
@@ -848,5 +887,41 @@ function handleSubscriptionDeleted(db: Database.Database, sub: Stripe.Subscripti
     console.log(`Subscription cancelled: ${stripeSubId}`);
   } catch (err) {
     console.error("Error handling subscription.deleted:", err instanceof Error ? err.message : err);
+  }
+}
+
+function handleInvoicePaid(db: Database.Database, invoice: Stripe.Invoice) {
+  try {
+    // In Stripe SDK v20+, subscription is nested under parent.subscription_details
+    const subDetails = invoice.parent?.subscription_details;
+    const subRef = subDetails?.subscription;
+    const subId = typeof subRef === "string" ? subRef : subRef?.id;
+    if (!subId) return; // Not a subscription invoice
+
+    const existing = getSubscriberByStripeId(db, subId);
+    if (!existing) return; // Not tracked
+
+    // Update subscription period from the invoice
+    const periodStart = invoice.lines?.data?.[0]?.period?.start;
+    const periodEnd = invoice.lines?.data?.[0]?.period?.end;
+
+    const updates: Parameters<typeof updateSubscriber>[2] = {};
+    if (periodStart) {
+      updates.current_period_start = new Date(periodStart * 1000).toISOString();
+    }
+    if (periodEnd) {
+      updates.current_period_end = new Date(periodEnd * 1000).toISOString();
+    }
+
+    if (Object.keys(updates).length > 0) {
+      updateSubscriber(db, subId, updates);
+    }
+
+    const amountCents = invoice.amount_paid ?? 0;
+    console.log(
+      `Invoice paid: subscription=${subId} amount=$${(amountCents / 100).toFixed(2)} period=${updates.current_period_start ?? "?"} to ${updates.current_period_end ?? "?"}`
+    );
+  } catch (err) {
+    console.error("Error handling invoice.paid:", err instanceof Error ? err.message : err);
   }
 }
