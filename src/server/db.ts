@@ -7,6 +7,7 @@
  * - subscribers: Stripe subscription state linked to users
  * - pool_runs: monthly batch retirement execution records
  * - attributions: per-subscriber fractional credit attribution per pool run
+ * - burns: REGEN token burn records linked to pool runs
  */
 
 import Database from "better-sqlite3";
@@ -83,6 +84,9 @@ export function getDb(dbPath = "data/regen-for-ai.db"): Database.Database {
       biodiversity_tx_hash TEXT,
       uss_credits_retired REAL DEFAULT 0,
       uss_tx_hash TEXT,
+      burn_allocation_cents INTEGER NOT NULL DEFAULT 0,
+      burn_tx_hash TEXT,
+      ops_allocation_cents INTEGER NOT NULL DEFAULT 0,
       carry_forward_cents INTEGER NOT NULL DEFAULT 0,
       subscriber_count INTEGER NOT NULL DEFAULT 0,
       dry_run INTEGER NOT NULL DEFAULT 0,
@@ -104,6 +108,22 @@ export function getDb(dbPath = "data/regen-for-ai.db"): Database.Database {
 
     CREATE INDEX IF NOT EXISTS idx_attributions_pool_run ON attributions(pool_run_id);
     CREATE INDEX IF NOT EXISTS idx_attributions_subscriber ON attributions(subscriber_id);
+
+    CREATE TABLE IF NOT EXISTS burns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pool_run_id INTEGER NOT NULL REFERENCES pool_runs(id),
+      allocation_cents INTEGER NOT NULL,
+      amount_uregen TEXT NOT NULL DEFAULT '0',
+      amount_regen REAL NOT NULL DEFAULT 0,
+      regen_price_usd REAL,
+      tx_hash TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'completed', 'skipped', 'failed')),
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_burns_pool_run ON burns(pool_run_id);
+    CREATE INDEX IF NOT EXISTS idx_burns_status ON burns(status);
   `);
 
   return _db;
@@ -288,6 +308,9 @@ export interface PoolRun {
   biodiversity_tx_hash: string | null;
   uss_credits_retired: number;
   uss_tx_hash: string | null;
+  burn_allocation_cents: number;
+  burn_tx_hash: string | null;
+  ops_allocation_cents: number;
   carry_forward_cents: number;
   subscriber_count: number;
   dry_run: number;
@@ -312,6 +335,7 @@ export function updatePoolRun(
     "carbon_credits_retired" | "carbon_tx_hash" |
     "biodiversity_credits_retired" | "biodiversity_tx_hash" |
     "uss_credits_retired" | "uss_tx_hash" |
+    "burn_allocation_cents" | "burn_tx_hash" | "ops_allocation_cents" |
     "carry_forward_cents" | "subscriber_count" | "error_log" | "completed_at"
   >>
 ): void {
@@ -380,4 +404,118 @@ export function getAttributionsBySubscriber(db: Database.Database, subscriberId:
   return db.prepare(
     "SELECT * FROM attributions WHERE subscriber_id = ? ORDER BY created_at DESC"
   ).all(subscriberId) as Attribution[];
+}
+
+// --- Email helpers ---
+
+export interface SubscriberWithEmail {
+  subscriber_id: number;
+  user_email: string;
+  plan: string;
+  amount_cents: number;
+  stripe_subscription_id: string;
+}
+
+export function getSubscribersWithEmails(db: Database.Database, subscriberIds: number[]): SubscriberWithEmail[] {
+  if (subscriberIds.length === 0) return [];
+  const placeholders = subscriberIds.map(() => "?").join(", ");
+  return db.prepare(`
+    SELECT
+      s.id AS subscriber_id,
+      u.email AS user_email,
+      s.plan,
+      s.amount_cents,
+      s.stripe_subscription_id
+    FROM subscribers s
+    JOIN users u ON s.user_id = u.id
+    WHERE s.id IN (${placeholders}) AND u.email IS NOT NULL
+  `).all(...subscriberIds) as SubscriberWithEmail[];
+}
+
+export interface CumulativeAttribution {
+  total_carbon: number;
+  total_biodiversity: number;
+  total_uss: number;
+  total_contribution_cents: number;
+  months_active: number;
+}
+
+// --- Burn types and helpers ---
+
+export interface Burn {
+  id: number;
+  pool_run_id: number;
+  allocation_cents: number;
+  amount_uregen: string;
+  amount_regen: number;
+  regen_price_usd: number | null;
+  tx_hash: string | null;
+  status: "pending" | "completed" | "skipped" | "failed";
+  error: string | null;
+  created_at: string;
+}
+
+export function createBurn(
+  db: Database.Database,
+  poolRunId: number,
+  allocationCents: number
+): Burn {
+  const result = db.prepare(
+    "INSERT INTO burns (pool_run_id, allocation_cents) VALUES (?, ?)"
+  ).run(poolRunId, allocationCents);
+  return db.prepare("SELECT * FROM burns WHERE id = ?").get(result.lastInsertRowid) as Burn;
+}
+
+export function updateBurn(
+  db: Database.Database,
+  id: number,
+  updates: Partial<Pick<Burn, "amount_uregen" | "amount_regen" | "regen_price_usd" | "tx_hash" | "status" | "error">>
+): void {
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  for (const [key, val] of Object.entries(updates)) {
+    if (val !== undefined) {
+      sets.push(`${key} = ?`);
+      values.push(val);
+    }
+  }
+  if (sets.length === 0) return;
+  values.push(id);
+  db.prepare(`UPDATE burns SET ${sets.join(", ")} WHERE id = ?`).run(...values);
+}
+
+export function getBurnsByPoolRun(db: Database.Database, poolRunId: number): Burn[] {
+  return db.prepare("SELECT * FROM burns WHERE pool_run_id = ?").all(poolRunId) as Burn[];
+}
+
+export function getTotalBurnedRegen(db: Database.Database): { total_regen: number; total_burns: number } {
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM(amount_regen), 0) AS total_regen,
+      COUNT(*) AS total_burns
+    FROM burns
+    WHERE status = 'completed'
+  `).get() as { total_regen: number; total_burns: number } | undefined;
+  return row ?? { total_regen: 0, total_burns: 0 };
+}
+
+export function getCumulativeAttribution(db: Database.Database, subscriberId: number): CumulativeAttribution {
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM(carbon_credits), 0) AS total_carbon,
+      COALESCE(SUM(biodiversity_credits), 0) AS total_biodiversity,
+      COALESCE(SUM(uss_credits), 0) AS total_uss,
+      COALESCE(SUM(contribution_cents), 0) AS total_contribution_cents,
+      COUNT(DISTINCT pool_run_id) AS months_active
+    FROM attributions
+    WHERE subscriber_id = ?
+  `).get(subscriberId) as CumulativeAttribution | undefined;
+
+  return row ?? {
+    total_carbon: 0,
+    total_biodiversity: 0,
+    total_uss: 0,
+    total_contribution_cents: 0,
+    months_active: 0,
+  };
 }

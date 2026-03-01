@@ -1,9 +1,10 @@
 /**
  * Monthly pool retirement service.
  *
- * Aggregates subscription revenue, allocates across credit types (50/30/20),
- * executes on-chain retirements via MsgBuyDirect, and records per-subscriber
- * fractional attributions.
+ * Aggregates subscription revenue, applies 85/10/5 revenue split
+ * (credits/REGEN burn/operations), allocates credit budget across
+ * credit types (50/30/20), executes on-chain retirements via MsgBuyDirect,
+ * burns REGEN tokens, and records per-subscriber fractional attributions.
  */
 
 import type Database from "better-sqlite3";
@@ -20,6 +21,8 @@ import {
   type Subscriber,
   type PoolRun,
 } from "../server/db.js";
+import { sendMonthlyEmails } from "./email.js";
+import { executeBurn, type BurnResult, formatBurnResult } from "./burn.js";
 
 export interface PoolRunResult {
   poolRunId: number;
@@ -27,11 +30,14 @@ export interface PoolRunResult {
   dryRun: boolean;
   subscriberCount: number;
   totalRevenueCents: number;
+  creditsBudgetCents: number;
   totalSpentCents: number;
   carryForwardCents: number;
   carbon: CreditTypeResult;
   biodiversity: CreditTypeResult;
   uss: CreditTypeResult;
+  burn: BurnResult;
+  opsAllocationCents: number;
   errors: string[];
 }
 
@@ -43,7 +49,14 @@ export interface CreditTypeResult {
   error: string | null;
 }
 
-/** Allocation percentages for each credit type */
+/** Revenue split: 85% credit purchases / 10% REGEN burn / 5% operations */
+const REVENUE_SPLIT = {
+  credits: 0.85,
+  burn: 0.10,
+  operations: 0.05,
+} as const;
+
+/** Allocation percentages for each credit type (within the credits budget) */
 const ALLOCATIONS = {
   carbon: 0.5,
   biodiversity: 0.3,
@@ -73,11 +86,14 @@ export async function executePoolRun(options: {
       dryRun: options.dryRun,
       subscriberCount: 0,
       totalRevenueCents: 0,
+      creditsBudgetCents: 0,
       totalSpentCents: 0,
       carryForwardCents: 0,
       carbon: emptyCreditResult(),
       biodiversity: emptyCreditResult(),
       uss: emptyCreditResult(),
+      burn: emptyBurnResult(),
+      opsAllocationCents: 0,
       errors: ["No active subscribers found"],
     };
   }
@@ -112,20 +128,28 @@ export async function executePoolRun(options: {
         dryRun: options.dryRun,
         subscriberCount: subscribers.length,
         totalRevenueCents,
+        creditsBudgetCents: 0,
         totalSpentCents: 0,
         carryForwardCents: totalRevenueCents,
         carbon: emptyCreditResult(),
         biodiversity: emptyCreditResult(),
         uss: emptyCreditResult(),
+        burn: emptyBurnResult(),
+        opsAllocationCents: 0,
         errors,
       };
     }
   }
 
-  // 5. Calculate budgets per credit type
-  const carbonBudget = Math.floor(totalRevenueCents * ALLOCATIONS.carbon);
-  const biodiversityBudget = Math.floor(totalRevenueCents * ALLOCATIONS.biodiversity);
-  const ussBudget = totalRevenueCents - carbonBudget - biodiversityBudget;
+  // 5. Apply 85/10/5 revenue split
+  const creditsBudgetCents = Math.floor(totalRevenueCents * REVENUE_SPLIT.credits);
+  const burnBudgetCents = Math.floor(totalRevenueCents * REVENUE_SPLIT.burn);
+  const opsAllocationCents = totalRevenueCents - creditsBudgetCents - burnBudgetCents;
+
+  // 5b. Calculate budgets per credit type (within credits budget)
+  const carbonBudget = Math.floor(creditsBudgetCents * ALLOCATIONS.carbon);
+  const biodiversityBudget = Math.floor(creditsBudgetCents * ALLOCATIONS.biodiversity);
+  const ussBudget = creditsBudgetCents - carbonBudget - biodiversityBudget;
 
   // 6. Execute purchases for each credit type
   const carbonResult = await purchaseCreditType(
@@ -138,11 +162,31 @@ export async function executePoolRun(options: {
     "uss", ussBudget, walletAddress, options.dryRun, errors
   );
 
-  // 7. Calculate totals
-  const totalSpentCents = carbonResult.spentCents + biodiversityResult.spentCents + ussResult.spentCents;
-  const carryForwardCents = totalRevenueCents - totalSpentCents;
+  // 7. Execute REGEN burn
+  let burnResult: BurnResult;
+  try {
+    burnResult = await executeBurn({
+      allocationCents: burnBudgetCents,
+      poolRunId: poolRun.id,
+      dryRun: options.dryRun,
+      dbPath: options.dbPath,
+    });
+    if (burnResult.error) {
+      errors.push(`Burn: ${burnResult.error}`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    errors.push(`Burn failed: ${msg}`);
+    burnResult = emptyBurnResult();
+    burnResult.allocationCents = burnBudgetCents;
+    burnResult.error = msg;
+  }
 
-  // 8. Determine overall status
+  // 8. Calculate totals
+  const totalSpentCents = carbonResult.spentCents + biodiversityResult.spentCents + ussResult.spentCents;
+  const carryForwardCents = creditsBudgetCents - totalSpentCents;
+
+  // 9. Determine overall status
   const anySuccess = carbonResult.creditsRetired > 0 || biodiversityResult.creditsRetired > 0 || ussResult.creditsRetired > 0;
   const allSuccess = carbonResult.error === null && biodiversityResult.error === null && ussResult.error === null;
   let status: "completed" | "partial" | "failed";
@@ -156,7 +200,7 @@ export async function executePoolRun(options: {
     status = "failed";
   }
 
-  // 9. Update pool_run record
+  // 10. Update pool_run record
   updatePoolRun(db, poolRun.id, {
     status,
     total_spent_cents: totalSpentCents,
@@ -166,27 +210,45 @@ export async function executePoolRun(options: {
     biodiversity_tx_hash: biodiversityResult.txHash,
     uss_credits_retired: ussResult.creditsRetired,
     uss_tx_hash: ussResult.txHash,
+    burn_allocation_cents: burnBudgetCents,
+    burn_tx_hash: burnResult.txHash,
+    ops_allocation_cents: opsAllocationCents,
     carry_forward_cents: carryForwardCents,
     error_log: errors.length > 0 ? JSON.stringify(errors) : null,
     completed_at: new Date().toISOString(),
   });
 
-  // 10. Calculate and record per-subscriber attributions
+  // 11. Calculate and record per-subscriber attributions
   recordAttributions(db, poolRun.id, subscribers, totalRevenueCents, carbonResult, biodiversityResult, ussResult);
 
-  return {
+  const result: PoolRunResult = {
     poolRunId: poolRun.id,
     status,
     dryRun: options.dryRun,
     subscriberCount: subscribers.length,
     totalRevenueCents,
+    creditsBudgetCents,
     totalSpentCents,
     carryForwardCents,
     carbon: carbonResult,
     biodiversity: biodiversityResult,
     uss: ussResult,
+    burn: burnResult,
+    opsAllocationCents,
     errors,
   };
+
+  // 12. Send monthly certificate emails (non-blocking)
+  if (!options.dryRun && (status === "completed" || status === "partial")) {
+    try {
+      await sendMonthlyEmails(poolRun.id, subscribers, db, result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`Email sending failed: ${msg}`);
+    }
+  }
+
+  return result;
 }
 
 async function purchaseCreditType(
@@ -345,6 +407,19 @@ function emptyCreditResult(): CreditTypeResult {
   };
 }
 
+function emptyBurnResult(): BurnResult {
+  return {
+    burnId: 0,
+    status: "skipped",
+    amountUregen: "0",
+    amountRegen: 0,
+    allocationCents: 0,
+    regenPriceUsd: null,
+    txHash: null,
+    error: null,
+  };
+}
+
 /** Format pool run result as a human-readable summary */
 export function formatPoolRunResult(result: PoolRunResult): string {
   const lines: string[] = [
@@ -352,29 +427,34 @@ export function formatPoolRunResult(result: PoolRunResult): string {
     `Status: ${result.status}${result.dryRun ? " (DRY RUN)" : ""}`,
     `Subscribers: ${result.subscriberCount}`,
     `Total Revenue: $${(result.totalRevenueCents / 100).toFixed(2)}`,
-    `Total Spent: $${(result.totalSpentCents / 100).toFixed(2)}`,
+    `  Credits (85%): $${(result.creditsBudgetCents / 100).toFixed(2)}`,
+    `  Burn (10%): $${(result.burn.allocationCents / 100).toFixed(2)}`,
+    `  Operations (5%): $${(result.opsAllocationCents / 100).toFixed(2)}`,
+    `Credits Spent: $${(result.totalSpentCents / 100).toFixed(2)}`,
     `Carry Forward: $${(result.carryForwardCents / 100).toFixed(2)}`,
     ``,
-    `--- Carbon (50%) ---`,
+    `--- Carbon (50% of credits) ---`,
     `  Budget: $${(result.carbon.budgetCents / 100).toFixed(2)}`,
     `  Spent: $${(result.carbon.spentCents / 100).toFixed(2)}`,
     `  Credits Retired: ${result.carbon.creditsRetired.toFixed(6)}`,
     ...(result.carbon.txHash ? [`  Tx: ${result.carbon.txHash}`] : []),
     ...(result.carbon.error ? [`  Error: ${result.carbon.error}`] : []),
     ``,
-    `--- Biodiversity (30%) ---`,
+    `--- Biodiversity (30% of credits) ---`,
     `  Budget: $${(result.biodiversity.budgetCents / 100).toFixed(2)}`,
     `  Spent: $${(result.biodiversity.spentCents / 100).toFixed(2)}`,
     `  Credits Retired: ${result.biodiversity.creditsRetired.toFixed(6)}`,
     ...(result.biodiversity.txHash ? [`  Tx: ${result.biodiversity.txHash}`] : []),
     ...(result.biodiversity.error ? [`  Error: ${result.biodiversity.error}`] : []),
     ``,
-    `--- USS/Marine (20%) ---`,
+    `--- USS/Marine (20% of credits) ---`,
     `  Budget: $${(result.uss.budgetCents / 100).toFixed(2)}`,
     `  Spent: $${(result.uss.spentCents / 100).toFixed(2)}`,
     `  Credits Retired: ${result.uss.creditsRetired.toFixed(6)}`,
     ...(result.uss.txHash ? [`  Tx: ${result.uss.txHash}`] : []),
     ...(result.uss.error ? [`  Error: ${result.uss.error}`] : []),
+    ``,
+    formatBurnResult(result.burn),
   ];
 
   if (result.errors.length > 0) {

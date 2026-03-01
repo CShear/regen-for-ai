@@ -36,6 +36,15 @@ export interface Config {
   stripePaymentLinkSeedling: string;
   stripePaymentLinkGrove: string;
   stripePaymentLinkForest: string;
+
+  // Email (Postmark)
+  postmarkServerToken: string | undefined;
+  emailFromAddress: string;
+  emailEnabled: boolean;
+
+  // REGEN buy-and-burn
+  burnEnabled: boolean;
+  regenPriceApiUrl: string;
 }
 
 let _config: Config | undefined;
@@ -77,6 +86,15 @@ export function loadConfig(): Config {
     stripePaymentLinkSeedling: process.env.STRIPE_PAYMENT_LINK_SEEDLING || "#",
     stripePaymentLinkGrove: process.env.STRIPE_PAYMENT_LINK_GROVE || "#",
     stripePaymentLinkForest: process.env.STRIPE_PAYMENT_LINK_FOREST || "#",
+
+    postmarkServerToken: process.env.POSTMARK_SERVER_TOKEN || undefined,
+    emailFromAddress: process.env.EMAIL_FROM_ADDRESS || "impact@regen-for-ai.com",
+    emailEnabled: process.env.EMAIL_ENABLED !== "false",
+
+    burnEnabled: process.env.REGEN_BURN_ENABLED === "true",
+    regenPriceApiUrl:
+      process.env.REGEN_PRICE_API_URL ||
+      "https://api.coingecko.com/api/v3/simple/price?ids=regen&vs_currencies=usd",
   };
 
   return _config;
