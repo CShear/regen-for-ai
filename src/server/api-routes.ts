@@ -486,6 +486,14 @@ export function createApiRoutes(
       });
 
       if (result.status === "success") {
+        const batches = (result.batches ?? []).map((b) => ({
+          batch_denom: b.batchDenom,
+          class_id: b.classId,
+          project_id: b.projectId,
+          amount: b.amount,
+        }));
+        const uniqueClassIds = [...new Set(batches.map((b) => b.class_id))];
+        const uniqueProjectIds = [...new Set(batches.map((b) => b.project_id))];
         res.json({
           status: "success",
           tx_hash: result.txHash,
@@ -498,6 +506,9 @@ export function createApiRoutes(
           reason: result.reason,
           beneficiary_name: result.beneficiaryName ?? null,
           remaining_balance_cents: result.remainingBalanceCents ?? null,
+          batches,
+          class_ids: uniqueClassIds,
+          project_ids: uniqueProjectIds,
         });
       } else {
         res.json({

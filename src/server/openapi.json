@@ -29,7 +29,7 @@
       "post": {
         "operationId": "retireCredits",
         "summary": "Retire ecocredits on Regen Network",
-        "description": "Execute an on-chain credit retirement. When a wallet is configured, credits are purchased and retired via MsgBuyDirect. Otherwise, returns a marketplace link for manual purchase.",
+        "description": "Execute an on-chain credit retirement.\n\n**IMPORTANT — branch on `status`:** This endpoint can return HTTP 200 with EITHER `status:\"success\"` (an on-chain retirement happened) OR `status:\"marketplace_link\"` (no on-chain action — the server gracefully fell back to a marketplace link because no matching sell orders, insufficient supply, broadcast failure, or non-zero tx code). Consumers anchoring this response to another system MUST check `status === \"success\"` before treating it as a real retirement.\n\nWhen a wallet is configured, credits are purchased and retired via MsgBuyDirect. Otherwise, returns a marketplace link for manual purchase.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -484,19 +484,43 @@
       },
       "RetireSuccess": {
         "type": "object",
-        "required": ["status", "tx_hash", "credits_retired"],
+        "required": ["status", "tx_hash", "credits_retired", "batches", "class_ids"],
         "properties": {
           "status": { "type": "string", "enum": ["success"] },
-          "tx_hash": { "type": "string" },
-          "credits_retired": { "type": "string" },
+          "tx_hash": { "type": "string", "description": "Cosmos transaction hash, lowercase hex (64 chars). Stable, immutable identifier on Regen Ledger." },
+          "credits_retired": { "type": "string", "description": "Total decimal quantity retired across all batches. On-chain precision is 6 decimals (microcredits)." },
           "cost": { "type": "string" },
           "block_height": { "type": "integer" },
-          "certificate_id": { "type": "string", "nullable": true },
+          "certificate_id": { "type": "string", "nullable": true, "description": "Indexer GraphQL nodeId. May be null if indexer hasn't caught up; tx_hash is the more durable key." },
           "certificate_url": { "type": "string", "format": "uri", "nullable": true },
           "jurisdiction": { "type": "string" },
           "reason": { "type": "string" },
           "beneficiary_name": { "type": "string", "nullable": true },
-          "remaining_balance_cents": { "type": "integer", "nullable": true }
+          "remaining_balance_cents": { "type": "integer", "nullable": true },
+          "batches": {
+            "type": "array",
+            "description": "Per-batch detail of what was retired. A single retire call may span multiple batches/projects if the order selector fills greedily.",
+            "items": {
+              "type": "object",
+              "required": ["batch_denom", "class_id", "project_id", "amount"],
+              "properties": {
+                "batch_denom": { "type": "string", "example": "C02-004-20210102-20211207-001" },
+                "class_id": { "type": "string", "example": "C02", "description": "Regen Ledger credit class id (methodology layer)." },
+                "project_id": { "type": "string", "example": "C02-004", "description": "Regen Ledger project id." },
+                "amount": { "type": "string", "description": "Decimal quantity retired from this specific batch." }
+              }
+            }
+          },
+          "class_ids": {
+            "type": "array",
+            "description": "Convenience: unique class_ids touched by this retirement. Most retirements are single-class; multi-class is possible when the selector spans batches.",
+            "items": { "type": "string" }
+          },
+          "project_ids": {
+            "type": "array",
+            "description": "Convenience: unique project_ids touched by this retirement.",
+            "items": { "type": "string" }
+          }
         }
       },
       "RetireMarketplace": {

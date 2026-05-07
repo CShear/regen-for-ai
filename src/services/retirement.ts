@@ -22,6 +22,13 @@ export interface RetirementParams {
   reason?: string;
 }
 
+export interface RetiredBatch {
+  batchDenom: string;
+  classId: string;
+  projectId: string;
+  amount: string;
+}
+
 export interface RetirementResult {
   status: "success" | "marketplace_fallback";
   txHash?: string;
@@ -35,6 +42,7 @@ export interface RetirementResult {
   jurisdiction?: string;
   reason?: string;
   beneficiaryName?: string;
+  batches?: RetiredBatch[];
 }
 
 async function checkPrepaidBalance(): Promise<{ available: boolean; balance_cents: number; topup_url?: string } | null> {
@@ -286,15 +294,26 @@ export async function executeRetirement(params: RetirementParams): Promise<Retir
 
     const displayCost = formatAmount(selection.totalCostMicro, selection.exponent, selection.displayDenom);
 
+    const batches: RetiredBatch[] = selection.orders.map((order) => {
+      const parts = order.batchDenom.split("-");
+      return {
+        batchDenom: order.batchDenom,
+        classId: parts[0] ?? order.batchDenom,
+        projectId: parts.slice(0, 2).join("-"),
+        amount: order.quantity,
+      };
+    });
+
     const result: RetirementResult = {
       status: "success",
-      txHash: txResult.transactionHash,
+      txHash: txResult.transactionHash.toLowerCase(),
       creditsRetired: selection.totalQuantity,
       cost: displayCost,
       blockHeight: txResult.height,
       jurisdiction: retireJurisdiction,
       reason: retireReason,
       beneficiaryName,
+      batches,
     };
 
     if (retirement) {
