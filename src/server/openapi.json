@@ -458,8 +458,8 @@
         "properties": {
           "credit_class": {
             "type": "string",
-            "description": "Credit class abbreviation (C, BT, MBS, KSH, USS)",
-            "example": "C"
+            "description": "Either a credit-type abbreviation (e.g. \"C\", \"BT\", \"MBS\", \"KSH\", \"USS\") to retire any class of that type, OR a full Regen Ledger class_id (e.g. \"C02\", \"BT01\", \"USS01\") to pin to that specific class. Input is normalized to uppercase. Omit to retire any available class.",
+            "example": "C02"
           },
           "quantity": {
             "type": "number",

@@ -168,12 +168,19 @@ export async function executeRetirement(params: RetirementParams): Promise<Retir
   try {
     const { address } = await initWallet();
 
+    // Distinguish bare abbreviation (e.g. "C", "BT", "KSH") from class_id
+    // (e.g. "C02", "BT01"). Abbreviations route through the credit-type filter;
+    // class_ids match exactly. Input is normalized to uppercase.
+    const cc = creditClass?.trim().toUpperCase();
+    const isAbbreviation = !!cc && /^[A-Z]+$/.test(cc);
+    const isClassId = !!cc && /^[A-Z]+\d/.test(cc);
+
     const selection = await selectBestOrders(
-      creditClass ? (creditClass.startsWith("C") ? "carbon" : "biodiversity") : undefined,
+      undefined, // creditType: superseded by creditTypeAbbrevs / creditClassId below
       retireQuantity,
       undefined, // preferredDenom
-      undefined, // creditTypeAbbrevs
-      creditClass // creditClassId — exact match when specified
+      isAbbreviation ? [cc] : undefined, // creditTypeAbbrevs — filters by credit_type_abbrev
+      isClassId ? cc : undefined // creditClassId — exact match on Regen class_id
     );
 
     if (selection.orders.length === 0) {
