@@ -34,6 +34,7 @@ import {
 } from "../server/db.js";
 import { sendMonthlyEmails } from "./email.js";
 import { executeBurn, type BurnResult, formatBurnResult } from "./burn.js";
+import { allocateProportional, creditsToMicro, microToCredits } from "./attribution.js";
 
 export interface PoolRunResult {
   poolRunId: number;
@@ -547,16 +548,26 @@ function recordAttributions(
   biodiversity: CreditTypeResult,
   uss: CreditTypeResult
 ): void {
-  if (totalRevenueCents <= 0) return;
+  if (totalRevenueCents <= 0 || subscribers.length === 0) return;
+
+  // Audit C1: previously this used `sub.amount_cents / totalRevenueCents` then
+  // multiplied each retired total by that float fraction. Per-subscriber shares
+  // could drift such that their sum was not exactly the retired total. Now
+  // computed in bigint micro-credits via Hamilton's largest-remainder method,
+  // which guarantees the shares sum exactly to creditsToMicro(creditsRetired).
+  const weights = subscribers.map((s) => BigInt(s.amount_cents));
+  const carbonShares = allocateProportional(creditsToMicro(carbon.creditsRetired), weights);
+  const biodiversityShares = allocateProportional(creditsToMicro(biodiversity.creditsRetired), weights);
+  const ussShares = allocateProportional(creditsToMicro(uss.creditsRetired), weights);
 
   const txn = db.transaction(() => {
-    for (const sub of subscribers) {
-      const fraction = sub.amount_cents / totalRevenueCents;
+    for (let i = 0; i < subscribers.length; i++) {
+      const sub = subscribers[i];
       const attr = createAttribution(db, poolRunId, sub.id, sub.amount_cents);
       updateAttribution(db, attr.id, {
-        carbon_credits: carbon.creditsRetired * fraction,
-        biodiversity_credits: biodiversity.creditsRetired * fraction,
-        uss_credits: uss.creditsRetired * fraction,
+        carbon_credits: microToCredits(carbonShares[i]),
+        biodiversity_credits: microToCredits(biodiversityShares[i]),
+        uss_credits: microToCredits(ussShares[i]),
       });
     }
   });
