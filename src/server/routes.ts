@@ -58,6 +58,7 @@ import {
   getPublicOrganizations,
 } from "./db.js";
 import { betaBannerCSS, betaBannerHTML, betaBannerJS } from "./beta-banner.js";
+import { createCheckoutLimiter, createWebhookLimiter } from "./rate-limit.js";
 import { sendWelcomeEmail, sendFirstRetirementEmail, sendRetirementReceiptEmail, sendReferralBonusEmail } from "../services/email.js";
 import { deriveSubscriberAddress, sweepSubscriberFunds } from "../services/subscriber-wallet.js";
 import { retireForSubscriber, accumulateBurnBudget, getPendingBurnBudget, markBurnExecuted, calculateNetAfterStripe, type SubscriberRetirementResult } from "../services/retire-subscriber.js";
@@ -111,6 +112,14 @@ function escapeHtml(str: string): string {
 
 export function createRoutes(stripe: Stripe | null, db: Database.Database, baseUrl: string, config?: Config): Router {
   const router = Router();
+
+  // Per-IP rate limiters for Stripe-facing endpoints. These are unauthenticated
+  // (no API key), so without limits a single IP could spam Stripe API calls or
+  // replay webhook payloads. Real correctness for /webhook still relies on
+  // signature verification + event-id idempotency below — this is just a
+  // resource-exhaustion bound.
+  const checkoutLimiter = createCheckoutLimiter();
+  const webhookLimiter = createWebhookLimiter();
 
   // --- Public routes ---
 
@@ -1787,7 +1796,7 @@ ${betaBannerJS()}
    * Creates a Stripe Checkout Session in subscription mode.
    * If a valid referral_code is provided, the subscription gets a 30-day free trial.
    */
-  router.post("/subscribe", async (req: Request, res: Response) => {
+  router.post("/subscribe", checkoutLimiter, async (req: Request, res: Response) => {
     try {
       const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
       const { tier, interval, email, referral_code } = body ?? {};
@@ -1865,7 +1874,7 @@ ${betaBannerJS()}
    * Body: { org_name, full_time_devs, autonomous_agents, part_time_users, amount_cents }
    * Creates organization record, then a Stripe Checkout Session for the calculated amount.
    */
-  router.post("/subscribe-org", async (req: Request, res: Response) => {
+  router.post("/subscribe-org", checkoutLimiter, async (req: Request, res: Response) => {
     try {
       const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
       const { org_name, full_time_devs, autonomous_agents, part_time_users, amount_cents } = body ?? {};
@@ -1993,7 +2002,7 @@ ${betaBannerJS()}
    * Body: { amount_cents: 1000, email?: "user@example.com" }
    * Returns: { url: "https://checkout.stripe.com/..." }
    */
-  router.post("/checkout", async (req: Request, res: Response) => {
+  router.post("/checkout", checkoutLimiter, async (req: Request, res: Response) => {
     try {
       const { amount_cents, email } = req.body;
 
@@ -2040,7 +2049,7 @@ ${betaBannerJS()}
    * Creates a Stripe Checkout session for a one-time boost retirement targeting a specific project.
    * Returns: { url: "https://checkout.stripe.com/..." }
    */
-  router.post("/boost-checkout", async (req: Request, res: Response) => {
+  router.post("/boost-checkout", checkoutLimiter, async (req: Request, res: Response) => {
     try {
       const { amount_cents, batch_denom, project_name } = req.body;
 
@@ -2111,7 +2120,7 @@ ${betaBannerJS()}
    * Stripe webhook handler — processes checkout.session.completed events.
    * Creates user if new, credits their balance, generates API key.
    */
-  router.post("/webhook", async (req: Request, res: Response) => {
+  router.post("/webhook", webhookLimiter, async (req: Request, res: Response) => {
     const sig = req.headers["stripe-signature"] as string;
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
@@ -2585,7 +2594,7 @@ ${betaBannerJS()}
    * Creates a Stripe Billing Portal session for subscription self-management
    * (upgrade, downgrade, cancel, update payment method) and redirects to it.
    */
-  router.get("/manage", async (req: Request, res: Response) => {
+  router.get("/manage", checkoutLimiter, async (req: Request, res: Response) => {
     try {
       const email = req.query.email as string | undefined;
 

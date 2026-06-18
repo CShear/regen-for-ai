@@ -47,6 +47,15 @@ export function startServer(options: { port?: number; dbPath?: string } = {}) {
 
   const app = express();
 
+  // Trust the reverse proxy (e.g. nginx) so req.ip reflects the real client.
+  // Required for per-IP rate limiting to work correctly in production. Set
+  // REGEN_TRUST_PROXY="false" to disable, or to a number to trust N hops.
+  const trustProxyEnv = process.env.REGEN_TRUST_PROXY;
+  if (trustProxyEnv !== "false") {
+    const hops = trustProxyEnv ? Number.parseInt(trustProxyEnv, 10) : NaN;
+    app.set("trust proxy", Number.isFinite(hops) && hops > 0 ? hops : 1);
+  }
+
   // Agent view middleware — intercepts ?view=agent on any page, mount first
   const agentViewRoutes = createAgentViewRoutes(baseUrl);
   app.use(agentViewRoutes);

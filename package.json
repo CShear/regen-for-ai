@@ -63,6 +63,7 @@
     "better-sqlite3": "^12.6.2",
     "ethers": "^6.16.0",
     "express": "^5.2.1",
+    "express-rate-limit": "8.4.1",
     "helmet": "^8.1.0",
     "osmojs": "^16.15.0",
     "stripe": "^20.3.1"
