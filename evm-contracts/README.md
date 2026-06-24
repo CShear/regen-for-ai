@@ -44,8 +44,10 @@ export PRIVATE_KEY=0x... # Your deployer private key
 export BASE_SEPOLIA_RPC_URL=https://sepolia.base.org
 
 # Deploy to Base Sepolia
-npx hardhat run scripts/deploy.js --network base-sepolia
+npx hardhat run evm-contracts/scripts/deploy.cjs --network base-sepolia
 ```
+
+The script deploys a mock bridged ERC-20 automatically if `BRIDGED_TOKEN_ADDRESS` is unset (testnet convenience) — pass a real Axelar-bridged token address once one exists on that network.
 
 ## Contract Addresses
 
