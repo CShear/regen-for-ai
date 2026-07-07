@@ -541,11 +541,16 @@ export async function retireForSubscriber(options: {
             // Funds remain in subscriber wallet for next month — not lost
             if (!result.error) result.error = errMsg;
             else result.error += `; ${errMsg}`;
-            // Adjust credits/spent to only count tradable success
-            const tradableCredits = tradableSelected.reduce((sum, s) => sum + parseFloat(s.quantity), 0);
-            const tradableCost = Number(tradableSelected.reduce((sum, s) => sum + s.costMicro, 0n) / BigInt(10 ** Math.max(denomExponent - 2, 0)));
-            result.creditsRetired = tradableCredits;
-            result.spentCents = tradableCost;
+            // Adjust credits/spent to only count tradable orders that ACTUALLY
+            // succeeded. result.buyTxHash is set only when Path A's tx returned
+            // code 0; if the tradable buy also failed, count zero.
+            const tradableSucceeded = tradableSelected.length > 0 && !!result.buyTxHash;
+            result.creditsRetired = tradableSucceeded
+              ? tradableSelected.reduce((sum, s) => sum + parseFloat(s.quantity), 0)
+              : 0;
+            result.spentCents = tradableSucceeded
+              ? Number(tradableSelected.reduce((sum, s) => sum + s.costMicro, 0n) / BigInt(10 ** Math.max(denomExponent - 2, 0)))
+              : 0;
             errors.push(`${batchDenom}: ${errMsg}`);
             await sendRetirementFailureAlert({
               batchDenom, subscriberId, error: errMsg,
@@ -561,11 +566,14 @@ export async function retireForSubscriber(options: {
           const errMsg = err instanceof Error ? err.message : String(err);
           if (!result.error) result.error = errMsg;
           else result.error += `; ${errMsg}`;
-          // Adjust to only count tradable success
-          const tradableCredits = tradableSelected.reduce((sum, s) => sum + parseFloat(s.quantity), 0);
-          const tradableCost = Number(tradableSelected.reduce((sum, s) => sum + s.costMicro, 0n) / BigInt(10 ** Math.max(denomExponent - 2, 0)));
-          result.creditsRetired = tradableCredits;
-          result.spentCents = tradableCost;
+          // Only count tradable orders that actually succeeded (see note above).
+          const tradableSucceeded = tradableSelected.length > 0 && !!result.buyTxHash;
+          result.creditsRetired = tradableSucceeded
+            ? tradableSelected.reduce((sum, s) => sum + parseFloat(s.quantity), 0)
+            : 0;
+          result.spentCents = tradableSucceeded
+            ? Number(tradableSelected.reduce((sum, s) => sum + s.costMicro, 0n) / BigInt(10 ** Math.max(denomExponent - 2, 0)))
+            : 0;
           errors.push(`${batchDenom} retire-only: ${errMsg}`);
           await sendRetirementFailureAlert({
             batchDenom, subscriberId, error: errMsg,

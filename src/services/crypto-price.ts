@@ -125,7 +125,11 @@ export async function toUsdCents(
     throw new Error(`Invalid amount: "${amount}"`);
   }
 
-  // Stablecoins
+  // Stablecoins valued at $1/unit. SECURITY: this shortcut is only safe because
+  // crypto-verify.ts only ever returns the symbol "USDC"/"USDT"/"xDAI" for tokens
+  // it validated against a per-chain allowlist (or a known native/mint). Unknown
+  // ERC-20s — including ones that spoof symbol()="USDC" — arrive here as a
+  // "chain:0xcontract" token string and fall through to the contract-price lookup.
   if (normalizedToken === "USDC" || normalizedToken === "USDT" || normalizedToken === "XDAI") {
     return Math.round(parsedAmount * 100);
   }

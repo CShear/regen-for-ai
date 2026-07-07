@@ -487,7 +487,7 @@ export async function executePoolRun(options: {
   });
 
   // 13. Calculate and record per-subscriber attributions
-  recordAttributions(db, poolRun.id, subscribers, totalRevenueCents, carbon, biodiversity, uss);
+  recordAttributions(db, poolRun.id, subscribers, creditsBudgetCents, carbon, biodiversity, uss);
 
   const result: PoolRunResult = {
     poolRunId: poolRun.id,
@@ -542,16 +542,23 @@ function recordAttributions(
   db: Database.Database,
   poolRunId: number,
   subscribers: Subscriber[],
-  totalRevenueCents: number,
+  creditsBudgetCents: number,
   carbon: CreditTypeResult,
   biodiversity: CreditTypeResult,
   uss: CreditTypeResult
 ): void {
-  if (totalRevenueCents <= 0) return;
+  if (creditsBudgetCents <= 0) return;
 
+  // Attribute retired credits by each subscriber's share of the CREDIT BUDGET,
+  // not gross revenue. Yearly plans route 85% to credits and monthly 75%, so a
+  // gross-revenue split would under-credit yearly subscribers (who contributed
+  // more to credits) in any mixed pool. Each subscriber's credit budget is
+  // floor(amount_cents * split.credits) — the same figure summed into the pool.
   const txn = db.transaction(() => {
     for (const sub of subscribers) {
-      const fraction = sub.amount_cents / totalRevenueCents;
+      const split = sub.billing_interval === "yearly" ? REVENUE_SPLIT_YEARLY : REVENUE_SPLIT_MONTHLY;
+      const subCreditBudget = Math.floor(sub.amount_cents * split.credits);
+      const fraction = subCreditBudget / creditsBudgetCents;
       const attr = createAttribution(db, poolRunId, sub.id, sub.amount_cents);
       updateAttribution(db, attr.id, {
         carbon_credits: carbon.creditsRetired * fraction,

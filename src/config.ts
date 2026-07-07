@@ -71,6 +71,9 @@ export interface Config {
   // Dashboard magic link auth
   magicLinkTtlMinutes: number;
   sessionSecret: string;
+
+  // Admin API auth (separate from sessionSecret; falls back to it for back-compat)
+  adminToken: string;
 }
 
 let _config: Config | undefined;
@@ -138,10 +141,40 @@ export function loadConfig(): Config {
     apiRateLimit: parseInt(process.env.REGEN_API_RATE_LIMIT || "100", 10),
 
     magicLinkTtlMinutes: parseInt(process.env.MAGIC_LINK_TTL_MINUTES || "15", 10),
-    sessionSecret: process.env.SESSION_SECRET || randomBytes(32).toString("hex"),
+    sessionSecret: process.env.SESSION_SECRET || requireSessionSecret(),
+    adminToken:
+      process.env.ADMIN_TOKEN ||
+      process.env.SESSION_SECRET ||
+      requireSessionSecret(),
   };
 
   return _config;
+}
+
+/**
+ * Resolve the session secret, failing closed in production.
+ *
+ * SESSION_SECRET signs dashboard/magic-link session cookies and (by fallback)
+ * gates admin endpoints. Silently generating a random secret per boot would
+ * invalidate every session on restart and rotate the admin token with no error,
+ * so in production we refuse to start without it. In dev we allow an ephemeral
+ * secret but warn loudly.
+ */
+let _ephemeralSecret: string | undefined;
+function requireSessionSecret(): string {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "SESSION_SECRET must be set in production. Refusing to start with an ephemeral secret."
+    );
+  }
+  if (!_ephemeralSecret) {
+    _ephemeralSecret = randomBytes(32).toString("hex");
+    console.warn(
+      "WARNING: SESSION_SECRET not set — using an ephemeral secret. " +
+      "Sessions and admin auth will not survive a restart. Set SESSION_SECRET."
+    );
+  }
+  return _ephemeralSecret;
 }
 
 export function isWalletConfigured(): boolean {

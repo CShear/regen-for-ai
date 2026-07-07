@@ -38,6 +38,16 @@ import { loadConfig } from "../config.js";
 import { regenLogoSVG, regenLogoPNG } from "./brand.js";
 import { getSubscribersNeedingRenewal, markRenewalReminderSent, type RenewalLevel } from "./db.js";
 import { sendRenewalReminderEmail } from "../services/email.js";
+import { sendTelegram } from "../services/admin-telegram.js";
+
+/** App version, read from package.json so /health reflects the deployed build. */
+const VERSION: string = (() => {
+  try {
+    return JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8")).version ?? "unknown";
+  } catch {
+    return "unknown";
+  }
+})();
 
 export function startServer(options: { port?: number; dbPath?: string } = {}) {
   const port = options.port ?? parseInt(process.env.REGEN_SERVER_PORT ?? "3141", 10);
@@ -66,7 +76,7 @@ export function startServer(options: { port?: number; dbPath?: string } = {}) {
 
   // Health check
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", version: "0.3.0" });
+    res.json({ status: "ok", version: VERSION });
   });
 
   // Static logo for emails (SVG)
@@ -439,9 +449,40 @@ export function startServer(options: { port?: number; dbPath?: string } = {}) {
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 
-  // Security headers (relaxed CSP since we use inline scripts extensively)
+  // Security headers. Pages use inline <script>/<style> heavily, so 'unsafe-inline'
+  // is retained for those — but the CSP still blocks arbitrary external script/style
+  // hosts, plugin objects, base-uri hijacking and framing, which turns any single
+  // future escaping slip from "fully exploitable" into "much harder to exploit".
+  // Allowlisted external hosts are exactly the ones the pages load today:
+  //   fonts.googleapis.com / fonts.gstatic.com  (brand fonts)
+  //   www.googletagmanager.com / *.google-analytics.com  (analytics)
+  //   cdn.jsdelivr.net  (Chart.js on the dashboard)
   app.use(helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: [
+          "'self'",
+          "'unsafe-inline'",
+          "https://www.googletagmanager.com",
+          "https://cdn.jsdelivr.net",
+          "https://*.google-analytics.com",
+        ],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: [
+          "'self'",
+          "https://www.googletagmanager.com",
+          "https://*.google-analytics.com",
+          "https://*.analytics.google.com",
+        ],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'none'"],
+      },
+    },
   }));
 
   // Mount routes (landing page, feedback, cancel, checkout-page always work;
@@ -615,8 +656,8 @@ button:hover{background:rgba(255,255,255,0.25)}
 </html>`);
   });
 
-  app.listen(port, () => {
-    console.log(`Regen Compute server running on ${baseUrl}`);
+  const server = app.listen(port, () => {
+    console.log(`Regen Compute server running on ${baseUrl} (v${VERSION})`);
     console.log(`  Certificates: ${baseUrl}/impact/:nodeId`);
     if (stripeKey) {
       console.log(`  Landing page: ${baseUrl}/`);
@@ -628,5 +669,43 @@ button:hover{background:rgba(255,255,255,0.25)}
     } else {
       console.log(`  Payment routes: disabled (no STRIPE_SECRET_KEY)`);
     }
+  });
+
+  // --- Graceful shutdown & global safety nets ---
+  // This process runs long, irreversible on-chain pipelines (retirements, the
+  // ~2-minute swap-and-burn). On a deploy signal, stop accepting new connections
+  // and close the DB cleanly rather than being killed mid-write.
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`Received ${signal} — shutting down gracefully...`);
+    server.close(() => {
+      try { db.close(); } catch { /* already closed */ }
+      console.log("HTTP server closed and DB flushed. Exiting.");
+      process.exit(0);
+    });
+    // Failsafe: force exit if connections don't drain in time.
+    const t = setTimeout(() => {
+      console.error("Forced exit after shutdown timeout.");
+      process.exit(1);
+    }, 25_000);
+    if (typeof t.unref === "function") t.unref();
+  };
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+
+  // A stray rejection should be logged and alerted, not silently crash the money
+  // server (Node's default is to terminate on unhandledRejection).
+  process.on("unhandledRejection", (reason) => {
+    const msg = reason instanceof Error ? reason.stack ?? reason.message : String(reason);
+    console.error("UNHANDLED REJECTION:", msg);
+    sendTelegram(`🚨 *Unhandled rejection*\n${String(msg).slice(0, 500)}`).catch(() => {});
+  });
+  process.on("uncaughtException", (err) => {
+    console.error("UNCAUGHT EXCEPTION:", err.stack ?? err.message);
+    sendTelegram(`🚨 *Uncaught exception — restarting*\n${(err.stack ?? err.message).slice(0, 500)}`).catch(() => {});
+    // An uncaught exception leaves state unknown; exit and let systemd restart.
+    shutdown("uncaughtException");
   });
 }

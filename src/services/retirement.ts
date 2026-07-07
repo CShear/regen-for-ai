@@ -13,6 +13,7 @@ import { CryptoPaymentProvider } from "./payment/crypto.js";
 import { StripePaymentProvider } from "./payment/stripe-stub.js";
 import type { PaymentProvider } from "./payment/types.js";
 import { buildRetirementReason } from "./retirement-reason.js";
+import { sendTelegram } from "./admin-telegram.js";
 
 export interface RetirementParams {
   creditClass?: string;
@@ -20,6 +21,13 @@ export interface RetirementParams {
   beneficiaryName?: string;
   jurisdiction?: string;
   reason?: string;
+  /**
+   * Hard ceiling (in USD cents) on how much the operator wallet may spend for
+   * this retirement. If the computed cost exceeds it, the retirement is refused
+   * BEFORE any on-chain broadcast. Callers use this to bound spend to a specific
+   * user's prepaid balance. Omit for no cap (e.g. the MCP direct-retirement path).
+   */
+  maxCostCents?: number;
 }
 
 export interface RetiredBatch {
@@ -34,6 +42,8 @@ export interface RetirementResult {
   txHash?: string;
   creditsRetired?: string;
   cost?: string;
+  /** Numeric cost of the retirement in USD cents (for per-user balance debiting). */
+  costCents?: number;
   blockHeight?: number;
   certificateId?: string;
   marketplaceUrl?: string;
@@ -197,6 +207,18 @@ export async function executeRetirement(params: RetirementParams): Promise<Retir
     }
 
     const costCents = Number(selection.totalCostMicro / BigInt(10 ** (selection.exponent - 2)));
+
+    // Spend ceiling: refuse before broadcasting if the cost exceeds the caller's cap.
+    // This bounds operator-wallet spend to the specific caller's prepaid balance.
+    if (params.maxCostCents != null && costCents > params.maxCostCents) {
+      return fallback(
+        `This retirement would cost $${(costCents / 100).toFixed(2)}, which exceeds your ` +
+        `available balance of $${(params.maxCostCents / 100).toFixed(2)}. ` +
+        `Top up your balance or retire a smaller quantity.`,
+        params
+      );
+    }
+
     if (usePrepaid) {
       const balance = await checkPrepaidBalance();
       if (!balance || !balance.available || balance.balance_cents < costCents) {
@@ -288,13 +310,25 @@ export async function executeRetirement(params: RetirementParams): Promise<Retir
     await provider.capturePayment(auth.id);
 
     if (usePrepaid) {
-      await debitPrepaidBalance(
+      const debit = await debitPrepaidBalance(
         costCents,
         `Retired ${selection.totalQuantity} credits (${creditClass || "mixed"})`,
         txResult.transactionHash,
         creditClass,
         parseFloat(selection.totalQuantity)
       );
+      // Credits are already irreversibly retired on-chain at this point. A failed
+      // debit means the operator wallet paid but the user was NOT charged — surface
+      // it loudly for reconciliation instead of silently swallowing the result.
+      if (!debit.success) {
+        const alertMsg =
+          `⚠️ Prepaid debit FAILED after on-chain retirement.\n` +
+          `tx: ${txResult.transactionHash}\n` +
+          `cost: $${(costCents / 100).toFixed(2)} | class: ${creditClass || "mixed"}\n` +
+          `Credits were retired but the user's balance was NOT debited — reconcile manually.`;
+        console.error(alertMsg);
+        sendTelegram(alertMsg).catch(() => {});
+      }
     }
 
     const retirement = await waitForRetirement(txResult.transactionHash);
@@ -316,6 +350,7 @@ export async function executeRetirement(params: RetirementParams): Promise<Retir
       txHash: txResult.transactionHash.toLowerCase(),
       creditsRetired: selection.totalQuantity,
       cost: displayCost,
+      costCents,
       blockHeight: txResult.height,
       jurisdiction: retireJurisdiction,
       reason: retireReason,

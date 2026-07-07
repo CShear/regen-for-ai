@@ -18,6 +18,23 @@ import { dirname } from "path";
 
 let _db: Database.Database | undefined;
 
+/**
+ * Run a destructive table-rebuild migration (CREATE new + copy + DROP + RENAME)
+ * atomically. Without a transaction, a crash between DROP and RENAME loses the
+ * table's rows with no rollback — for the `transactions`/`subscribers` tables that
+ * would mean losing the money audit trail. Foreign keys are toggled off for the
+ * duration per SQLite's recommended table-redefine procedure (a PRAGMA that is a
+ * no-op inside a transaction, so it must wrap the transaction, not sit inside it).
+ */
+function rebuildInTransaction(db: Database.Database, sql: string): void {
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.transaction(() => db.exec(sql))();
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
+
 export function getDb(dbPath = "data/regen-compute.db"): Database.Database {
   if (_db) return _db;
 
@@ -346,7 +363,7 @@ export function getDb(dbPath = "data/regen-compute.db"): Database.Database {
   // Migration: update subscribers CHECK constraint to include new plan names
   const subSchema = (_db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='subscribers'").get() as { sql: string } | undefined)?.sql ?? "";
   if (subSchema.includes("plan IN ('seedling', 'grove', 'forest')") && !subSchema.includes("'dabbler'")) {
-    _db.exec(`
+    rebuildInTransaction(_db, `
       CREATE TABLE subscribers_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL REFERENCES users(id),
@@ -396,7 +413,7 @@ export function getDb(dbPath = "data/regen-compute.db"): Database.Database {
   // Migration: update scheduled_retirements CHECK constraint to include 'partial'
   const schedSchema = (_db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='scheduled_retirements'").get() as { sql: string } | undefined)?.sql ?? "";
   if (schedSchema && !schedSchema.includes("partial")) {
-    _db.exec(`
+    rebuildInTransaction(_db, `
       CREATE TABLE IF NOT EXISTS scheduled_retirements_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         subscriber_id INTEGER NOT NULL REFERENCES subscribers(id),
@@ -446,7 +463,7 @@ export function getDb(dbPath = "data/regen-compute.db"): Database.Database {
   // SQLite CHECK constraints can't be altered, so recreate the table if needed
   const tableInfo = _db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='transactions'").get() as { sql: string } | undefined;
   if (tableInfo && !tableInfo.sql.includes("subscription")) {
-    _db.exec(`
+    rebuildInTransaction(_db, `
       CREATE TABLE transactions_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL REFERENCES users(id),
@@ -519,7 +536,7 @@ export function getDb(dbPath = "data/regen-compute.db"): Database.Database {
 
   // Migration: add 'referral_bonus' to transactions type CHECK constraint
   if (tableInfo && !tableInfo.sql.includes("referral_bonus")) {
-    _db.exec(`
+    rebuildInTransaction(_db, `
       CREATE TABLE transactions_v3 (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL REFERENCES users(id),
@@ -545,7 +562,7 @@ export function getDb(dbPath = "data/regen-compute.db"): Database.Database {
   // Migration: add 'held' status to referral_rewards CHECK constraint
   const rrCheckInfo = _db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='referral_rewards'").get() as { sql: string } | undefined;
   if (rrCheckInfo?.sql && !rrCheckInfo.sql.includes("held")) {
-    _db.exec(`
+    rebuildInTransaction(_db, `
       CREATE TABLE referral_rewards_new (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         referrer_user_id INTEGER NOT NULL REFERENCES users(id),

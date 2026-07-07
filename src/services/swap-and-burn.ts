@@ -260,10 +260,33 @@ export async function swapAndBurn(options: {
       return result;
     }
   } else {
-    // OSMO: calculate amount from USD allocation and OSMO price
-    // Use SQS router to get a quote for the OSMO amount
-    const osmoNeeded = allocationUsd / osmoAmount; // rough estimate — SQS will give exact
-    swapInputAmount = Math.floor(osmoNeeded * 1_000_000).toString();
+    // OSMO: quote OSMO→USDC to get the REAL OSMO price, then size the swap from it.
+    // (Previously this divided the dollar allocation by the wallet's OSMO *balance*,
+    // which is dimensionally wrong and produced an arbitrary amount.)
+    try {
+      const priceQuote = await getSwapRoute(UOSMO, "1000000", USDC_AXL_ON_OSMOSIS);
+      const osmoPriceUsd = Number(priceQuote.amount_out) / 1_000_000;
+      if (!(osmoPriceUsd > 0)) {
+        result.errors.push("OSMO price quote returned a non-positive price");
+        return result;
+      }
+      console.log(`OSMO price: ~$${osmoPriceUsd.toFixed(4)}`);
+      const osmoNeeded = allocationUsd / osmoPriceUsd;
+      swapInputAmount = Math.floor(osmoNeeded * 1_000_000).toString();
+
+      // Keep a gas reserve — never swap the OSMO we need to pay swap/IBC fees.
+      const GAS_RESERVE_OSMO = 0.05;
+      if (osmoAmount < osmoNeeded + GAS_RESERVE_OSMO && !dryRun) {
+        result.errors.push(
+          `Insufficient OSMO: need ~${osmoNeeded.toFixed(6)} to swap + ${GAS_RESERVE_OSMO} for gas, ` +
+          `have ${osmoAmount.toFixed(6)}. Fund ${osmoAddress} with OSMO.`
+        );
+        return result;
+      }
+    } catch (err) {
+      result.errors.push(`OSMO price quote failed: ${err instanceof Error ? err.message : err}`);
+      return result;
+    }
   }
 
   result.swapAmountIn = swapInputAmount;
@@ -284,16 +307,19 @@ export async function swapAndBurn(options: {
     return result;
   }
 
-  // Sanity check: if SQS quote is wildly inflated, cap it and warn
+  // The swap INPUT is always bounded to the dollar allocation (USDC/ATOM are sized
+  // directly from it; OSMO is now sized from the real OSMO price above), so an
+  // inflated quote just means a favorable price — it can't cause overspend. Log it
+  // for visibility but do NOT lower amount_out: the tokenOutMinAmount below already
+  // floors slippage protection at 80% of target, so weakening it here would only
+  // reduce protection.
   const quotedRegen = Number(swapRoute.amount_out) / 1_000_000;
   if (quotedRegen > targetRegen * 2) {
-    result.errors.push(
-      `SQS quote looks wrong: quoted ${quotedRegen.toFixed(2)} REGEN but target is ` +
-      `${targetRegen.toFixed(2)} REGEN (${(quotedRegen / targetRegen).toFixed(1)}x). ` +
-      `Using target-based amount instead.`
+    console.warn(
+      `SQS quote is ${(quotedRegen / targetRegen).toFixed(1)}x the target ` +
+      `(${quotedRegen.toFixed(2)} vs ${targetRegen.toFixed(2)} REGEN) — proceeding with ` +
+      `dollar-bounded input; min-out floor still applies.`
     );
-    // Fall back to target with 20% buffer for slippage
-    swapRoute.amount_out = Math.floor(targetRegen * 1.2 * 1_000_000).toString();
   }
 
   // Build swap message using poolmanager

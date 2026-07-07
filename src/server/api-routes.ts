@@ -32,8 +32,10 @@ import {
   clearRenewalReminders,
   getExpiringCryptoSubscribers,
   getAllSubscribersByUserId,
+  debitBalance,
   type User,
 } from "./db.js";
+import { sendTelegram } from "../services/admin-telegram.js";
 import { estimateFootprint } from "../services/estimator.js";
 import { getRetirementById, getRetirementStats, getOrderStats } from "../services/indexer.js";
 import { listCreditClasses, listSellOrders, listProjects } from "../services/ledger.js";
@@ -52,6 +54,9 @@ import {
   getCommunitySubscriberCount,
   type ScheduledRetirement,
 } from "./db.js";
+
+// Accounts allowed to bypass per-user balance limits (operator/admin use).
+const ADMIN_EMAILS = new Set(["christian@regen.network"]);
 
 // Credit type abbreviation to human-readable name
 const CREDIT_TYPE_NAMES: Record<string, string> = {
@@ -273,42 +278,23 @@ export function createApiRoutes(
         return;
       }
 
-      // Record the payment
-      const cryptoPayment = createCryptoPayment(db, {
-        chain: verified.chain,
-        tx_hash: verified.txHash,
-        from_address: verified.fromAddress,
-        token: verified.token,
-        amount: verified.amount,
-        usd_value_cents: usdCents,
-      });
-
-      // Find or create user — bind from_address to prevent front-running
+      // Find or create user — bind from_address to prevent front-running.
+      // (Read-only checks are done before the write transaction so we can
+      //  early-return cleanly on an address-ownership conflict.)
       const contactEmail = (typeof email === "string" && email.includes("@")) ? email.trim().toLowerCase() : null;
-      let user: User | undefined;
-
-      // Check if this sender address already has an associated user
+      let boundUser: User | undefined;
       if (verified.fromAddress) {
         const existingPayment = db.prepare(
           "SELECT user_id FROM crypto_payments WHERE from_address = ? AND user_id IS NOT NULL AND status = 'provisioned' LIMIT 1"
         ).get(verified.fromAddress) as { user_id: number } | undefined;
 
         if (existingPayment) {
-          // This address already belongs to a user — use that account
-          user = db.prepare("SELECT * FROM users WHERE id = ?").get(existingPayment.user_id) as User | undefined;
-          if (user && contactEmail && user.email && user.email.toLowerCase() !== contactEmail) {
-            // Different email trying to claim payments from an address that belongs to someone else
+          boundUser = db.prepare("SELECT * FROM users WHERE id = ?").get(existingPayment.user_id) as User | undefined;
+          if (boundUser && contactEmail && boundUser.email && boundUser.email.toLowerCase() !== contactEmail) {
             apiError(res, 403, "ADDRESS_BOUND", "This sender address is already associated with a different account.");
             return;
           }
         }
-      }
-
-      if (!user) {
-        user = contactEmail ? getUserByEmail(db, contactEmail) : undefined;
-      }
-      if (!user) {
-        user = createUser(db, contactEmail, null);
       }
 
       // Calculate subscription duration
@@ -325,22 +311,62 @@ export function createApiRoutes(
 
       // No Stripe fees for crypto payments — net = gross
       const monthlyNetCents = monthlyGrossCents;
+      const burnBudgetCents = Math.floor(usdCents * 0.05); // front-loaded 5%
 
-      // Create subscriber
       const now = new Date();
       const periodEnd = new Date(now);
       periodEnd.setMonth(periodEnd.getMonth() + subscriptionMonths);
-
       const plan = usdCents >= 5000 ? "agent" : usdCents >= 2500 ? "builder" : "dabbler";
-      const subscriber = createSubscriber(
-        db, user.id,
-        `crypto_${verified.chain}_${verified.txHash.slice(0, 16)}`,
-        plan, usdCents,
-        now.toISOString(), periodEnd.toISOString(),
-        "yearly" // treat crypto as yearly for revenue split (85/5/10)
-      );
 
-      // Derive Regen address — reuse existing address for multi-sub users
+      // ATOMIC PROVISIONING: record the payment, create the user + subscriber,
+      // schedule retirements, front-load burn budget, and flip the payment to
+      // 'provisioned' — all in one transaction. A crash mid-way rolls the whole
+      // thing back so a retry re-provisions cleanly, instead of leaving a paid
+      // customer stranded with a half-written, un-retryable record.
+      let user!: User;
+      let subscriber!: ReturnType<typeof createSubscriber>;
+      const provision = db.transaction(() => {
+        const cryptoPayment = createCryptoPayment(db, {
+          chain: verified.chain,
+          tx_hash: verified.txHash,
+          from_address: verified.fromAddress,
+          token: verified.token,
+          amount: verified.amount,
+          usd_value_cents: usdCents,
+        });
+
+        user = boundUser
+          ?? (contactEmail ? getUserByEmail(db, contactEmail) : undefined)
+          ?? createUser(db, contactEmail, null);
+
+        subscriber = createSubscriber(
+          db, user.id,
+          `crypto_${verified.chain}_${verified.txHash.slice(0, 16)}`,
+          plan, usdCents,
+          now.toISOString(), periodEnd.toISOString(),
+          "yearly" // treat crypto as yearly for revenue split (85/5/10)
+        );
+
+        for (let month = 1; month < retirementMonths; month++) {
+          const scheduledDate = new Date(now);
+          scheduledDate.setMonth(scheduledDate.getMonth() + month);
+          createScheduledRetirement(
+            db, subscriber.id, monthlyGrossCents, monthlyNetCents,
+            scheduledDate.toISOString().split("T")[0],
+            "yearly"
+          );
+        }
+
+        db.prepare(
+          "INSERT INTO burn_accumulator (amount_cents, source_type, subscriber_id) VALUES (?, 'crypto_payment', ?)"
+        ).run(burnBudgetCents, subscriber.id);
+
+        updateCryptoPaymentStatus(db, cryptoPayment.id, "provisioned", subscriber.id, user.id);
+      });
+      provision();
+
+      // Post-commit, non-critical: derive Regen address (async, can't run inside a
+      // better-sqlite3 transaction) and clear stale renewal reminders.
       let regenAddr: string | null = null;
       try {
         const existingSubs = getAllSubscribersByUserId(db, user.id);
@@ -349,27 +375,6 @@ export function createApiRoutes(
         db.prepare("UPDATE subscribers SET regen_address = ? WHERE id = ?").run(regenAddr, subscriber.id);
       } catch { /* non-critical */ }
 
-      // Schedule retirements (months 2-N)
-      for (let month = 1; month < retirementMonths; month++) {
-        const scheduledDate = new Date(now);
-        scheduledDate.setMonth(scheduledDate.getMonth() + month);
-        createScheduledRetirement(
-          db, subscriber.id, monthlyGrossCents, monthlyNetCents,
-          scheduledDate.toISOString().split("T")[0],
-          "yearly"
-        );
-      }
-
-      // Front-load burn budget (5% of total net)
-      const burnBudgetCents = Math.floor(usdCents * 0.05);
-      db.prepare(
-        "INSERT INTO burn_accumulator (amount_cents, source_type, subscriber_id) VALUES (?, 'crypto_payment', ?)"
-      ).run(burnBudgetCents, subscriber.id);
-
-      // Update crypto payment record
-      updateCryptoPaymentStatus(db, cryptoPayment.id, "provisioned", subscriber.id, user.id);
-
-      // Clear renewal reminders on existing crypto subs (user renewed)
       const existingCryptoSubs = getExpiringCryptoSubscribers(db, user.id);
       for (const cs of existingCryptoSubs) {
         clearRenewalReminders(db, cs.id);
@@ -476,6 +481,21 @@ export function createApiRoutes(
       return;
     }
 
+    // Authorization: this endpoint spends the shared operator wallet. Re-read the
+    // caller's CURRENT balance and only allow spend up to that balance, debiting it
+    // atomically after the retirement. Without this, any valid API key could drain
+    // the wallet. Admins are exempt (operator/testing use).
+    const freshUser = getUserByApiKey(db, user.api_key) ?? user;
+    const isAdmin = !!freshUser.email && ADMIN_EMAILS.has(freshUser.email);
+    if (!isAdmin && freshUser.balance_cents <= 0) {
+      apiError(
+        res, 402, "INSUFFICIENT_BALANCE",
+        "Retiring credits requires a prepaid balance. Top up to enable on-demand retirement.",
+        { balance_cents: freshUser.balance_cents, topup_url: `${baseUrl}/#pricing` }
+      );
+      return;
+    }
+
     try {
       const result = await executeRetirement({
         creditClass: credit_class,
@@ -483,7 +503,31 @@ export function createApiRoutes(
         beneficiaryName: beneficiary_name,
         jurisdiction,
         reason,
+        // Cap spend at the caller's balance so cost can never exceed what they paid.
+        maxCostCents: isAdmin ? undefined : freshUser.balance_cents,
       });
+
+      // Charge the caller's own prepaid balance for a successful on-chain retirement.
+      if (result.status === "success" && !isAdmin) {
+        const chargeCents = result.costCents ?? 0;
+        if (chargeCents > 0) {
+          const debit = debitBalance(
+            db, freshUser.id, chargeCents,
+            `On-demand retirement (${credit_class || "mixed"})`,
+            result.txHash, credit_class, result.creditsRetired ? parseFloat(result.creditsRetired) : undefined
+          );
+          if (!debit.success) {
+            // Cost was capped to balance, so this should not happen except under a
+            // concurrent race. Credits are already retired — alert for reconciliation.
+            const alertMsg =
+              `⚠️ API retire: balance debit FAILED after on-chain retirement.\n` +
+              `user=${freshUser.id} tx=${result.txHash} cost=$${(chargeCents / 100).toFixed(2)}\n` +
+              `Credits retired but user NOT charged — reconcile.`;
+            console.error(alertMsg);
+            sendTelegram(alertMsg).catch(() => {});
+          }
+        }
+      }
 
       if (result.status === "success") {
         const batches = (result.batches ?? []).map((b) => ({
@@ -756,7 +800,6 @@ export function createApiRoutes(
     if (!user) return;
 
     // Admin-only: restrict to known admin email
-    const ADMIN_EMAILS = new Set(["christian@regen.network"]);
     if (!user.email || !ADMIN_EMAILS.has(user.email)) {
       return apiError(res, 403, "FORBIDDEN", "This endpoint requires admin access");
     }

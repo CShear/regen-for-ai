@@ -11,6 +11,7 @@
  */
 
 import { Router, Request, Response } from "express";
+import { timingSafeEqual } from "crypto";
 import Stripe from "stripe";
 import type Database from "better-sqlite3";
 import type { Config } from "../config.js";
@@ -109,8 +110,62 @@ function escapeHtml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/** Accounts with admin access to internal endpoints. */
+const ADMIN_EMAILS = new Set(["christian@regen.network"]);
+
+/** Constant-time check of the admin bearer token (config.adminToken). */
+function isValidAdminBearer(authHeader: string | undefined, config?: Config): boolean {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return false;
+  const expected = config?.adminToken ?? "";
+  if (!expected) return false;
+  const a = Buffer.from(authHeader.slice(7));
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+/** True if the request carries a logged-in dashboard session for an admin email. */
+async function isAdminSession(req: Request, config?: Config): Promise<boolean> {
+  const { getSessionEmail } = await import("./magic-link.js");
+  const email = getSessionEmail(req.headers.cookie, config?.sessionSecret ?? "");
+  return !!email && ADMIN_EMAILS.has(email);
+}
+
+/**
+ * Minimal in-memory per-IP rate limiter for abuse-sensitive endpoints (each
+ * unauthenticated /checkout etc. creates a Stripe session). Fixed 1-minute window.
+ */
+function ipRateLimiter(maxPerMinute: number) {
+  const windows = new Map<string, { count: number; windowStart: number }>();
+  const cleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [k, w] of windows) if (now - w.windowStart > 120_000) windows.delete(k);
+  }, 300_000);
+  if (typeof cleanup.unref === "function") cleanup.unref();
+
+  return (req: Request, res: Response, next: () => void): void => {
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    const now = Date.now();
+    const w = windows.get(ip);
+    if (!w || now - w.windowStart >= 60_000) {
+      windows.set(ip, { count: 1, windowStart: now });
+      next();
+      return;
+    }
+    if (w.count >= maxPerMinute) {
+      res.status(429).json({ error: "Too many requests. Please try again in a minute." });
+      return;
+    }
+    w.count++;
+    next();
+  };
+}
+
 export function createRoutes(stripe: Stripe | null, db: Database.Database, baseUrl: string, config?: Config): Router {
   const router = Router();
+
+  // Rate limiter for abuse-sensitive money endpoints (Stripe session creation, debit).
+  const moneyLimiter = ipRateLimiter(20);
 
   // --- Public routes ---
 
@@ -1787,7 +1842,7 @@ ${betaBannerJS()}
    * Creates a Stripe Checkout Session in subscription mode.
    * If a valid referral_code is provided, the subscription gets a 30-day free trial.
    */
-  router.post("/subscribe", async (req: Request, res: Response) => {
+  router.post("/subscribe", moneyLimiter, async (req: Request, res: Response) => {
     try {
       const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
       const { tier, interval, email, referral_code } = body ?? {};
@@ -1865,7 +1920,7 @@ ${betaBannerJS()}
    * Body: { org_name, full_time_devs, autonomous_agents, part_time_users, amount_cents }
    * Creates organization record, then a Stripe Checkout Session for the calculated amount.
    */
-  router.post("/subscribe-org", async (req: Request, res: Response) => {
+  router.post("/subscribe-org", moneyLimiter, async (req: Request, res: Response) => {
     try {
       const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
       const { org_name, full_time_devs, autonomous_agents, part_time_users, amount_cents } = body ?? {};
@@ -1917,6 +1972,12 @@ ${betaBannerJS()}
         ],
         success_url: `${baseUrl}/success?session_id={CHECKOUT_SESSION_ID}&type=subscription&org_id=${org.id}`,
         cancel_url: `${baseUrl}/cancel`,
+        // Session-level metadata (readable via a plain sessions.retrieve) so the
+        // /org/publicity handler can prove the caller owns this org's checkout.
+        metadata: {
+          tier: "org",
+          org_id: String(org.id),
+        },
         subscription_data: {
           metadata: {
             tier: "org",
@@ -1950,25 +2011,40 @@ ${betaBannerJS()}
         res.status(400).json({ error: "org_id is required" });
         return;
       }
+      if (!session_id || typeof session_id !== "string") {
+        res.status(400).json({ error: "session_id is required" });
+        return;
+      }
+      if (!stripe) {
+        res.status(503).json({ error: "Stripe not configured" });
+        return;
+      }
 
-      // Verify the org exists and the session matches
       const org = getOrganizationById(db, Number(org_id));
       if (!org) {
         res.status(404).json({ error: "Organization not found" });
         return;
       }
 
-      updateOrganizationPublicity(db, org.id, !!opt_in);
+      // AUTHORIZATION: prove the caller owns this org by requiring the org's own
+      // Stripe checkout session. Without this, any unauthenticated request could
+      // toggle any org's public listing by enumerating sequential org_ids.
+      let sessionEmail: string | null = null;
+      try {
+        const session = await stripe.checkout.sessions.retrieve(session_id);
+        if (String(session.metadata?.org_id ?? "") !== String(org.id)) {
+          res.status(403).json({ error: "Session does not match this organization" });
+          return;
+        }
+        sessionEmail = session.customer_email ?? session.customer_details?.email ?? null;
+      } catch {
+        res.status(403).json({ error: "Invalid or unverifiable checkout session" });
+        return;
+      }
 
-      // Update contact email if we can resolve it from the session
-      if (session_id) {
-        try {
-          const session = await stripe.checkout.sessions.retrieve(session_id);
-          const email = session.customer_email ?? session.customer_details?.email;
-          if (email) {
-            db.prepare("UPDATE organizations SET contact_email = ?, updated_at = datetime('now') WHERE id = ?").run(email, org.id);
-          }
-        } catch { /* non-critical */ }
+      updateOrganizationPublicity(db, org.id, !!opt_in);
+      if (sessionEmail) {
+        db.prepare("UPDATE organizations SET contact_email = ?, updated_at = datetime('now') WHERE id = ?").run(sessionEmail, org.id);
       }
 
       res.json({ ok: true, publicity_opt_in: !!opt_in });
@@ -1993,7 +2069,7 @@ ${betaBannerJS()}
    * Body: { amount_cents: 1000, email?: "user@example.com" }
    * Returns: { url: "https://checkout.stripe.com/..." }
    */
-  router.post("/checkout", async (req: Request, res: Response) => {
+  router.post("/checkout", moneyLimiter, async (req: Request, res: Response) => {
     try {
       const { amount_cents, email } = req.body;
 
@@ -2040,7 +2116,7 @@ ${betaBannerJS()}
    * Creates a Stripe Checkout session for a one-time boost retirement targeting a specific project.
    * Returns: { url: "https://checkout.stripe.com/..." }
    */
-  router.post("/boost-checkout", async (req: Request, res: Response) => {
+  router.post("/boost-checkout", moneyLimiter, async (req: Request, res: Response) => {
     try {
       const { amount_cents, batch_denom, project_name } = req.body;
 
@@ -2126,15 +2202,23 @@ ${betaBannerJS()}
         res.status(400).json({ error: `Webhook Error: ${msg}` });
         return;
       }
-    } else if (process.env.NODE_ENV === "production") {
-      console.error("Webhook rejected: STRIPE_WEBHOOK_SECRET is required in production");
-      res.status(500).json({ error: "Webhook signature verification not configured" });
-      return;
-    } else {
-      // Development only: accept unverified webhooks for local testing
-      console.warn("WARNING: Processing unverified webhook (no STRIPE_WEBHOOK_SECRET set)");
+    } else if (
+      process.env.ALLOW_UNSIGNED_WEBHOOKS === "true" &&
+      process.env.NODE_ENV !== "production"
+    ) {
+      // Explicit local-dev opt-in ONLY. The gate is the presence of a verified
+      // signature, not the ambient NODE_ENV — a deploy that forgets to set
+      // NODE_ENV=production must still fail closed rather than trust forged events.
+      console.warn("WARNING: Processing UNVERIFIED webhook (ALLOW_UNSIGNED_WEBHOOKS=true, dev only)");
       const body = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : req.body;
       event = (typeof body === "string" ? JSON.parse(body) : body) as Stripe.Event;
+    } else {
+      console.error(
+        "Webhook rejected: a valid Stripe signature is required " +
+        "(set STRIPE_WEBHOOK_SECRET, or ALLOW_UNSIGNED_WEBHOOKS=true in dev)."
+      );
+      res.status(400).json({ error: "Webhook signature required" });
+      return;
     }
 
     // Idempotency: skip duplicate webhook events (Stripe retries)
@@ -2142,8 +2226,11 @@ ${betaBannerJS()}
       console.log(`Skipping duplicate webhook event: ${event.id} (${event.type})`);
       return res.json({ received: true });
     }
-    markEventProcessed(db, event.id, event.type);
 
+    // Handle the event, then mark it processed ONLY on success. If handling throws,
+    // we do NOT mark it — returning 500 so Stripe retries, instead of silently
+    // dropping paid provisioning behind a premature idempotency marker.
+    try {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
       const amountCents = session.amount_total ?? 0;
@@ -2230,7 +2317,18 @@ ${betaBannerJS()}
       ).catch(() => {});
     }
 
-    res.json({ received: true });
+      // Success \u2014 record the event so Stripe's retries are deduplicated.
+      markEventProcessed(db, event.id, event.type);
+      res.json({ received: true });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`Webhook handler failed for ${event.id} (${event.type}):`, msg);
+      sendTelegram(
+        `\u26a0\ufe0f *Webhook Handler Failed*\nEvent: ${event.type} (${event.id})\n${msg}\n_Not marked processed \u2014 Stripe will retry._`
+      ).catch(() => {});
+      // Do NOT markEventProcessed \u2014 leave it retryable.
+      res.status(500).json({ error: "Webhook handling failed; will retry" });
+    }
   });
 
   /**
@@ -2587,17 +2685,21 @@ ${betaBannerJS()}
    */
   router.get("/manage", async (req: Request, res: Response) => {
     try {
-      const email = req.query.email as string | undefined;
-
+      // AUTHORIZATION: the billing portal grants full control over a subscription
+      // (view invoices, change payment method, cancel). Identify the user from
+      // their authenticated dashboard session — never from a URL-supplied email,
+      // which anyone could guess to hijack another customer's billing account.
+      const { getSessionEmail } = await import("./magic-link.js");
+      const email = getSessionEmail(req.headers.cookie, config?.sessionSecret ?? "");
       if (!email) {
-        res.status(400).send("Missing email parameter. Use: /manage?email=you@example.com");
+        res.redirect(302, `${baseUrl}/dashboard/login`);
         return;
       }
 
       // Look up user to get their Stripe customer ID
       const user = getUserByEmail(db, email);
       if (!user || !user.stripe_customer_id) {
-        res.status(404).send("No subscription found for this email. If you just subscribed, try again in a few seconds.");
+        res.status(404).send("No subscription found for your account. If you just subscribed, try again in a few seconds.");
         return;
       }
 
@@ -2641,7 +2743,7 @@ ${betaBannerJS()}
    * Body: { amount_cents, description, retirement_tx_hash?, credit_class?, credits_retired? }
    * Returns: { success, balance_cents, balance_dollars }
    */
-  router.post("/debit", (req: Request, res: Response) => {
+  router.post("/debit", moneyLimiter, (req: Request, res: Response) => {
     const user = authenticateRequest(req, res, db);
     if (!user) return;
 
@@ -2779,7 +2881,12 @@ ${betaBannerJS()}
     res.json({ ok: true });
   });
 
-  router.get("/feedback", (_req: Request, res: Response) => {
+  router.get("/feedback", async (req: Request, res: Response) => {
+    // Contains user-submitted names and messages — admin only.
+    if (!(await isAdminSession(req, config))) {
+      res.status(404).send("Not found");
+      return;
+    }
     const rows = db.prepare(
       "SELECT * FROM beta_feedback ORDER BY created_at DESC"
     ).all() as Array<{ id: number; name: string | null; message: string; category: string; page: string | null; created_at: string }>;
@@ -2837,7 +2944,7 @@ ${betaBannerJS()}
   // Auth: Bearer SESSION_SECRET
   router.post("/admin/referrals/approve", async (req: Request, res: Response) => {
     const auth = req.headers.authorization;
-    if (!auth || auth !== `Bearer ${config?.sessionSecret}`) {
+    if (!isValidAdminBearer(auth, config)) {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
@@ -2873,7 +2980,7 @@ ${betaBannerJS()}
   // GET /admin/referrals/held — list held referral rewards
   router.get("/admin/referrals/held", (req: Request, res: Response) => {
     const auth = req.headers.authorization;
-    if (!auth || auth !== `Bearer ${config?.sessionSecret}`) {
+    if (!isValidAdminBearer(auth, config)) {
       res.status(401).json({ error: "Unauthorized" });
       return;
     }
@@ -3484,8 +3591,11 @@ function executeRetirementAsync(
         `Partial retirement for subscriber ${subscriberId}: ${failedBatches.length} failed batches. ` +
         `Auto-retrying in 60s with payment_id=${paymentId}`
       );
-      setTimeout(async () => {
-        try {
+      setTimeout(() => {
+        // Serialize the retry under the same per-subscriber lock as the primary
+        // path so it can't run concurrently with another retirement and
+        // double-retire the same payment.
+        withSubscriberLock(subscriberId, async () => {
           console.log(`Auto-retry: re-executing retirement for subscriber ${subscriberId} (payment_id=${paymentId})`);
           const retryResult = await retireForSubscriber({
             subscriberId,
@@ -3495,9 +3605,9 @@ function executeRetirementAsync(
             paymentId,
           });
           console.log(`Auto-retry result: subscriber ${subscriberId} status=${retryResult.status} credits=${retryResult.totalCreditsRetired}`);
-        } catch (err) {
+        }).catch((err) => {
           console.error(`Auto-retry failed for subscriber ${subscriberId}:`, err instanceof Error ? err.message : err);
-        }
+        });
       }, 60_000);
     } else if (result.status === "partial") {
       console.warn(
@@ -3606,6 +3716,13 @@ const AUTO_BURN_THRESHOLD_CENTS = 500; // $5.00
 /** Debounce: don't trigger another burn if one ran within the last hour. */
 const BURN_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 
+/**
+ * In-process single-flight guard. The cooldown timestamp is only written AFTER
+ * the ~2-minute swap-and-burn finishes, so it cannot prevent a second concurrent
+ * invocation from swapping the same pending budget again. This flag does.
+ */
+let _autoBurnInFlight = false;
+
 /** Get last burn attempt timestamp from DB (survives restarts). */
 function getLastBurnAttempt(db: Database.Database): number {
   const row = db.prepare(
@@ -3663,6 +3780,11 @@ function backfillSubscriberRegenAddresses(db: Database.Database): void {
  * Non-blocking, fire-and-forget — failures are logged, not thrown.
  */
 async function maybeExecuteAutoBurn(db: Database.Database): Promise<void> {
+  // Single-flight: bail if a burn is already running. This check and the claim
+  // below are synchronous with no await between them, so concurrent fire-and-forget
+  // callers can't both pass it.
+  if (_autoBurnInFlight) return;
+
   const now = Date.now();
   const lastBurn = getLastBurnAttempt(db);
   if (now - lastBurn < BURN_COOLDOWN_MS) return;
@@ -3670,19 +3792,29 @@ async function maybeExecuteAutoBurn(db: Database.Database): Promise<void> {
   const pendingCents = getPendingBurnBudget(db);
   if (pendingCents < AUTO_BURN_THRESHOLD_CENTS) return;
 
-  // Check Osmosis wallet readiness before attempting
-  const readiness = await checkOsmosisReadiness();
-  if (!readiness.ready) {
-    console.log(
-      `Auto-burn: $${(pendingCents / 100).toFixed(2)} pending but Osmosis wallet not ready: ` +
-      readiness.issues.join("; ")
-    );
-    return;
-  }
-
-  console.log(`Auto-burn: triggering swap-and-burn for $${(pendingCents / 100).toFixed(2)} pending burn budget`);
-
+  _autoBurnInFlight = true;
   try {
+    // Check Osmosis wallet readiness before attempting
+    const readiness = await checkOsmosisReadiness();
+    if (!readiness.ready) {
+      console.log(
+        `Auto-burn: $${(pendingCents / 100).toFixed(2)} pending but Osmosis wallet not ready: ` +
+        readiness.issues.join("; ")
+      );
+      return;
+    }
+
+    // Snapshot the accumulator rows this burn covers BEFORE the swap. Budget added
+    // during the multi-minute swap gets a higher id and must NOT be marked executed
+    // here (it stays pending for the next burn) — otherwise it would be recorded as
+    // burned without ever being swapped.
+    const snap = db.prepare(
+      "SELECT MAX(id) AS max_id FROM burn_accumulator WHERE executed = 0"
+    ).get() as { max_id: number | null };
+    const snapshotMaxId = snap.max_id;
+
+    console.log(`Auto-burn: triggering swap-and-burn for $${(pendingCents / 100).toFixed(2)} pending burn budget`);
+
     const result = await swapAndBurn({
       allocationCents: pendingCents,
       swapDenom: readiness.usdcBalance >= pendingCents / 100
@@ -3693,13 +3825,10 @@ async function maybeExecuteAutoBurn(db: Database.Database): Promise<void> {
     });
 
     if (result.status === "completed" || result.status === "partial") {
-      // Mark accumulated entries as executed — even on partial, the swap already
-      // happened so we must not re-process these entries (prevents over-burning).
-      const maxId = db.prepare(
-        "SELECT MAX(id) AS max_id FROM burn_accumulator WHERE executed = 0"
-      ).get() as { max_id: number | null };
-      if (maxId.max_id) {
-        markBurnExecuted(db, maxId.max_id);
+      // Mark only the rows snapshotted before the swap — even on partial, the swap
+      // already happened so we must not re-process them (prevents over-burning).
+      if (snapshotMaxId) {
+        markBurnExecuted(db, snapshotMaxId);
       }
       if (result.status === "partial") {
         console.warn(`Auto-burn partial: swap succeeded but IBC/burn may have failed. Entries marked executed to prevent double-swap.`);
@@ -3710,8 +3839,15 @@ async function maybeExecuteAutoBurn(db: Database.Database): Promise<void> {
       );
     } else {
       console.warn(`Auto-burn ${result.status}: ${result.errors.join("; ")}`);
+      sendTelegram(
+        `⚠️ *Auto-burn failed*\nStatus: ${result.status}\n${result.errors.join("; ")}`
+      ).catch(() => {});
     }
   } catch (err) {
-    console.error("Auto-burn error:", err instanceof Error ? err.message : err);
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("Auto-burn error:", msg);
+    sendTelegram(`⚠️ *Auto-burn error*\n${msg}`).catch(() => {});
+  } finally {
+    _autoBurnInFlight = false;
   }
 }

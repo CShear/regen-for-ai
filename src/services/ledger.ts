@@ -90,10 +90,26 @@ export async function listBatches(projectId?: string): Promise<CreditBatch[]> {
 }
 
 export async function listSellOrders(): Promise<SellOrder[]> {
-  const data = await fetchJSON<{ sell_orders: SellOrder[] }>(
-    "/regen/ecocredit/marketplace/v1/sell-orders"
-  );
-  return data.sell_orders.filter((o) => {
+  // Paginate: the Cosmos LCD returns a bounded page (~100) by default. Once the
+  // marketplace exceeds one page, specific targeted sell orders could silently
+  // disappear from the result, causing paid retirements to fail with "order not
+  // found". Walk pagination.next_key until exhausted.
+  const all: SellOrder[] = [];
+  let nextKey: string | undefined;
+  let pages = 0;
+  do {
+    const qs = new URLSearchParams({ "pagination.limit": "1000" });
+    if (nextKey) qs.set("pagination.key", nextKey);
+    const data = await fetchJSON<{
+      sell_orders: SellOrder[];
+      pagination?: { next_key: string | null };
+    }>(`/regen/ecocredit/marketplace/v1/sell-orders?${qs.toString()}`);
+    all.push(...(data.sell_orders ?? []));
+    nextKey = data.pagination?.next_key || undefined;
+    pages++;
+  } while (nextKey && pages < 50); // guard against pathological pagination loops
+
+  return all.filter((o) => {
     const classId = o.batch_denom.replace(/-\d.*$/, "");
     return !EXCLUDED_CLASS_IDS.has(classId);
   });

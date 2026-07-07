@@ -244,6 +244,17 @@ export async function verifyEvmTx(
   if (!tx) throw new Error(`${chain} tx not found: ${txHash}`);
   if (!receipt) throw new Error(`${chain} tx receipt not found (pending?): ${txHash}`);
 
+  // Reject reverted transactions. A tx can carry a Transfer log / value and still
+  // revert; status "0x1" (or "0x01") means success. Some very old chains omit
+  // status entirely, in which case we cannot assert and fall through.
+  if (
+    receipt.status !== undefined &&
+    receipt.status !== "0x1" &&
+    receipt.status !== "0x01"
+  ) {
+    throw new Error(`${chain} tx reverted (status ${receipt.status}): ${txHash}`);
+  }
+
   const currentBlock = hexToDecimal(blockNumRaw as string);
   const txBlock = hexToDecimal(receipt.blockNumber);
   const confirmations = Number(currentBlock - txBlock);
@@ -283,7 +294,7 @@ export async function verifyEvmTx(
       };
     }
 
-    // Unknown ERC-20 — try to fetch metadata from chain
+    // Unknown ERC-20 — try to fetch metadata from chain (used only for decimals)
     const metadata = await fetchErc20Metadata(rpcs, contractAddr);
 
     if (confirmations < 1) {
@@ -292,11 +303,13 @@ export async function verifyEvmTx(
       );
     }
 
-    // Use chain-prefixed contract address as token name for unknown tokens,
-    // unless we successfully decoded the symbol
-    const tokenName = metadata.symbol !== contractAddr
-      ? metadata.symbol
-      : `${chain}:${contractAddr}`;
+    // SECURITY: never trust the on-chain symbol() string for pricing. An attacker
+    // can deploy a worthless token whose symbol() returns "USDC" and have it valued
+    // at $1/unit. For any contract not in WELL_KNOWN_TOKENS, we identify the token
+    // purely by its chain-prefixed contract address, forcing toUsdCents() to price
+    // it via an authoritative contract-address lookup (which returns nothing for a
+    // valueless token) instead of the trusted-stablecoin shortcut.
+    const tokenName = `${chain}:${contractAddr}`;
 
     return {
       chain,
@@ -700,11 +713,37 @@ const CHAIN_ALIASES: Record<string, string> = {
   ftm: "fantom",
 };
 
+/**
+ * Validate a transaction hash against the expected per-chain format before it is
+ * interpolated into any external API URL. Prevents malformed / path-injecting
+ * input from reaching mempool.space, TronGrid, etc.
+ */
+function assertValidTxHash(chain: string, txHash: string): void {
+  const h = txHash.trim();
+  const isEvm = chain in EVM_CHAINS;
+  if (isEvm) {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(h)) {
+      throw new Error(`Invalid ${chain} transaction hash format`);
+    }
+  } else if (chain === "bitcoin" || chain === "tron") {
+    if (!/^[0-9a-fA-F]{64}$/.test(h)) {
+      throw new Error(`Invalid ${chain} transaction hash format`);
+    }
+  } else if (chain === "solana") {
+    // Base58 signature, typically 87-88 chars
+    if (!/^[1-9A-HJ-NP-Za-km-z]{43,90}$/.test(h)) {
+      throw new Error("Invalid solana transaction signature format");
+    }
+  }
+}
+
 export async function verifyPayment(
   chain: string,
   txHash: string,
 ): Promise<VerifiedPayment> {
   const normalizedChain = CHAIN_ALIASES[chain.toLowerCase().trim()] ?? chain.toLowerCase().trim();
+
+  assertValidTxHash(normalizedChain, txHash);
 
   // EVM chains
   if (normalizedChain in EVM_CHAINS) {
