@@ -2234,6 +2234,36 @@ ${betaBannerJS()}
       return res.json({ received: true });
     }
 
+    // Shared-Stripe-account guard: whitelabel instances (e.g. Terrasos/Tebu)
+    // run on this same Stripe account, and every webhook endpoint receives
+    // EVERY account event. Their sessions/subscriptions are stamped with
+    // metadata.instance; invoices carry the subscription's metadata snapshot.
+    // Process only unstamped (legacy regen) or explicitly-regen events, or one
+    // payment provisions (and retires credits) once per instance.
+    // charge.refunded is exempt — no metadata reaches the charge, and its
+    // handler only logs for accounting.
+    if (event.type !== "charge.refunded") {
+      const evtObj = event.data.object as any;
+      let instanceTag: string | null =
+        evtObj?.metadata?.instance ??
+        evtObj?.subscription_details?.metadata?.instance ??
+        evtObj?.lines?.data?.[0]?.metadata?.instance ??
+        null;
+      if (instanceTag === null && stripe && typeof evtObj?.subscription === "string") {
+        try {
+          const sub = await stripe.subscriptions.retrieve(evtObj.subscription);
+          instanceTag = sub.metadata?.instance ?? null;
+        } catch {
+          // fall through with null — treated as regen's event
+        }
+      }
+      if (instanceTag !== null && instanceTag !== "regen") {
+        console.log(`Skipping webhook event ${event.id} (${event.type}) — belongs to instance "${instanceTag}"`);
+        markEventProcessed(db, event.id, event.type);
+        return res.json({ received: true });
+      }
+    }
+
     // Handle the event, then mark it processed ONLY on success. If handling throws,
     // we do NOT mark it — returning 500 so Stripe retries, instead of silently
     // dropping paid provisioning behind a premature idempotency marker.
