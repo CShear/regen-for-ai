@@ -469,6 +469,11 @@ export function startServer(options: { port?: number; dbPath?: string } = {}) {
           "https://cdn.jsdelivr.net",
           "https://*.google-analytics.com",
         ],
+        // Pages wire interactivity through inline onclick= attributes, which
+        // helmet's default script-src-attr 'none' blocks (it does NOT inherit
+        // script-src's 'unsafe-inline'). Without this, every button on the
+        // landing page silently dies.
+        scriptSrcAttr: ["'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"],
         imgSrc: ["'self'", "data:", "https:"],

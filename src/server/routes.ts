@@ -671,7 +671,7 @@ ${brandSchemaOrg()}
         </div>
 
         <!-- Plan options -->
-        <div class="plan-option" onclick="${hasPriceIds ? "subscribe('dabbler')" : `window.location.href='${dabblerUrl}'`}">
+        <div class="plan-option" onclick="${hasPriceIds ? "selectPlan(this);subscribe('dabbler')" : `window.location.href='${dabblerUrl}'`}">
           <div>
             <div class="plan-option__name">${t(lang, "tier_dabbler")}</div>
             <div class="plan-option__desc">${t(lang, "tier_dabbler_desc")}${referralValid ? ` &mdash; <strong style="color:var(--color-emerald);">${t(lang, "tier_first_month_free")}</strong>` : ""}</div>
@@ -681,7 +681,7 @@ ${brandSchemaOrg()}
             <span class="plan-option__price price-yearly" style="display:none;">$12.50<span style="font-size:11px;color:var(--color-muted);font-weight:400;">/yr</span></span>
           </div>
         </div>
-        <div class="plan-option selected" onclick="${hasPriceIds ? "subscribe('builder')" : `window.location.href='${builderUrl}'`}">
+        <div class="plan-option selected" onclick="${hasPriceIds ? "selectPlan(this);subscribe('builder')" : `window.location.href='${builderUrl}'`}">
           <div>
             <div class="plan-option__name">${t(lang, "tier_builder")} <span style="font-size:10px;background:var(--color-emerald);color:#fff;padding:2px 8px;border-radius:10px;margin-left:6px;font-weight:700;">${t(lang, "tier_builder_badge")}</span></div>
             <div class="plan-option__desc">${t(lang, "tier_builder_desc")}${referralValid ? ` &mdash; <strong style="color:var(--color-emerald);">${t(lang, "tier_first_month_free")}</strong>` : ""}</div>
@@ -691,7 +691,7 @@ ${brandSchemaOrg()}
             <span class="plan-option__price price-yearly" style="display:none;">$25<span style="font-size:11px;color:var(--color-muted);font-weight:400;">/yr</span></span>
           </div>
         </div>
-        <div class="plan-option" onclick="${hasPriceIds ? "subscribe('agent')" : `window.location.href='${agentUrl}'`}">
+        <div class="plan-option" onclick="${hasPriceIds ? "selectPlan(this);subscribe('agent')" : `window.location.href='${agentUrl}'`}">
           <div>
             <div class="plan-option__name">${t(lang, "tier_agent")}</div>
             <div class="plan-option__desc">${t(lang, "tier_agent_desc")}${referralValid ? ` &mdash; <strong style="color:var(--color-emerald);">${t(lang, "tier_first_month_free")}</strong>` : ""}</div>
@@ -1029,6 +1029,13 @@ ${brandSchemaOrg()}
   </script>
 
   <script>
+    // Clicking a plan moves the highlight to it (the featured tier only
+    // pre-selects the default) before the subscribe flow opens.
+    function selectPlan(el) {
+      var opts = document.querySelectorAll('.plan-option');
+      for (var i = 0; i < opts.length; i++) opts[i].classList.remove('selected');
+      el.classList.add('selected');
+    }
     var currentInterval = 'monthly';
     function setPricingInterval(interval) {
       currentInterval = interval;
