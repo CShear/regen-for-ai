@@ -3,10 +3,70 @@
  *
  * Finds the cheapest sell orders that match criteria and fills
  * across multiple orders if needed.
+ *
+ * All quantity arithmetic is done in bigint micro-credits (1 credit =
+ * 1_000_000 micro-credits) — the same scale used by the chain. parseFloat()
+ * was removed from the greedy fill loop (audit C1): float subtraction
+ * accumulated rounding errors across iterations, and float-multiply-before-
+ * BigInt produced spurious sub-micro digits like 100000.00000000001.
  */
 
 import { listSellOrders, listCreditClasses, listBatches, getAllowedDenoms } from "./ledger.js";
 import type { SellOrder, CreditClass, AllowedDenom } from "./ledger.js";
+
+/** Internal scale for credit quantities. The chain reports balances at this exponent. */
+const QUANTITY_EXPONENT = 6;
+const QUANTITY_SCALE = 10n ** BigInt(QUANTITY_EXPONENT); // 1_000_000n
+
+/**
+ * Parse a decimal credit quantity string ("10.5", "0.000001") into bigint
+ * micro-credits. Throws on malformed input. Truncates at the 6th decimal
+ * place — anything beyond that is sub-micro and cannot be represented.
+ */
+function parseQuantityToMicro(decimal: string): bigint {
+  const trimmed = decimal.trim();
+  if (!/^-?\d+(\.\d+)?$/.test(trimmed)) {
+    throw new Error(`Invalid decimal quantity: ${JSON.stringify(decimal)}`);
+  }
+  const negative = trimmed.startsWith("-");
+  const body = negative ? trimmed.slice(1) : trimmed;
+  const [whole, frac = ""] = body.split(".");
+  const fracPadded = (frac + "0".repeat(QUANTITY_EXPONENT)).slice(0, QUANTITY_EXPONENT);
+  const micro = BigInt(whole) * QUANTITY_SCALE + BigInt(fracPadded || "0");
+  return negative ? -micro : micro;
+}
+
+/**
+ * Render a bigint micro-credit count back to a fixed-precision decimal string
+ * (e.g. 10500000n → "10.500000"). Always shows QUANTITY_EXPONENT decimals so
+ * the output round-trips through parseQuantityToMicro.
+ */
+function formatMicroToQuantity(micro: bigint): string {
+  const negative = micro < 0n;
+  const abs = negative ? -micro : micro;
+  const whole = abs / QUANTITY_SCALE;
+  const frac = abs % QUANTITY_SCALE;
+  const fracStr = frac.toString().padStart(QUANTITY_EXPONENT, "0");
+  return `${negative ? "-" : ""}${whole}.${fracStr}`;
+}
+
+/** Convert a JS number quantity (from MCP/REST callers) to bigint micro-credits. */
+function numberToMicro(quantity: number): bigint {
+  if (!Number.isFinite(quantity) || quantity < 0) {
+    throw new Error(`Invalid numeric quantity: ${quantity}`);
+  }
+  // Single float touch: round to the nearest micro-credit. Bounded error of 0.5
+  // micro is the unavoidable cost of accepting a JS `number` from the caller.
+  return BigInt(Math.round(quantity * Number(QUANTITY_SCALE)));
+}
+
+/** Test-only exports — these helpers are pure and worth covering directly. */
+export const __orderSelectorInternals = {
+  parseQuantityToMicro,
+  formatMicroToQuantity,
+  numberToMicro,
+  QUANTITY_SCALE,
+};
 
 export interface OrderSelection {
   orders: SelectedOrder[];
@@ -112,28 +172,39 @@ export async function selectBestOrders(
     return 0;
   });
 
-  // Fill from cheapest available orders
-  let remaining = quantity;
+  // Fill from cheapest available orders. All arithmetic is bigint micro-credits.
+  // Cost formula: cost_micro = ask_amount * quantity_micro / QUANTITY_SCALE
+  // (ask_amount is per-credit in micro-payment-units; dividing by QUANTITY_SCALE
+  // converts micro-credits → credits in the multiplication.) We round UP on the
+  // division so partial sub-micro costs are charged to the buyer, not absorbed.
+  const requestedMicro = numberToMicro(quantity);
+  let remainingMicro = requestedMicro;
   const selected: SelectedOrder[] = [];
   let totalCostMicro = 0n;
   let insufficientSupply = false;
 
   for (const order of eligible) {
-    if (remaining <= 0) break;
+    if (remainingMicro <= 0n) break;
 
-    const available = parseFloat(order.quantity);
-    if (available <= 0) continue;
+    let availableMicro: bigint;
+    try {
+      availableMicro = parseQuantityToMicro(order.quantity);
+    } catch {
+      continue; // Skip malformed quantities rather than fail the whole selection.
+    }
+    if (availableMicro <= 0n) continue;
 
-    const take = Math.min(remaining, available);
+    const takeMicro = remainingMicro < availableMicro ? remainingMicro : availableMicro;
     const pricePerCredit = BigInt(order.ask_amount);
-    // Cost = quantity * price_per_credit (ask_amount is in micro-units)
-    // Since quantity can be fractional, compute cost carefully
-    const costMicro = (pricePerCredit * BigInt(Math.ceil(take * 1_000_000))) / 1_000_000n;
+
+    // Ceiling division: (a + b - 1) / b
+    const numer = pricePerCredit * takeMicro;
+    const costMicro = (numer + QUANTITY_SCALE - 1n) / QUANTITY_SCALE;
 
     selected.push({
       sellOrderId: order.id,
       batchDenom: order.batch_denom,
-      quantity: take.toFixed(6),
+      quantity: formatMicroToQuantity(takeMicro),
       askAmount: order.ask_amount,
       askDenom: order.ask_denom,
       costMicro,
@@ -141,18 +212,19 @@ export async function selectBestOrders(
     });
 
     totalCostMicro += costMicro;
-    remaining -= take;
+    remainingMicro -= takeMicro;
   }
 
-  if (remaining > 0.000001) {
+  // Insufficient if more than one micro-credit short.
+  if (remainingMicro > 1n) {
     insufficientSupply = true;
   }
 
-  const actualQuantity = quantity - Math.max(remaining, 0);
+  const actualMicro = requestedMicro - (remainingMicro > 0n ? remainingMicro : 0n);
 
   return {
     orders: selected,
-    totalQuantity: actualQuantity.toFixed(6),
+    totalQuantity: formatMicroToQuantity(actualMicro),
     totalCostMicro,
     paymentDenom: denomInfo.bankDenom,
     displayDenom: denomInfo.displayDenom,
