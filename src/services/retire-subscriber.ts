@@ -29,6 +29,7 @@ import {
   getSubscriberByStripeId,
   getMonthlyCreditSelection,
   getUserDisplayNameBySubscriberId,
+  getUserCountryBySubscriberId,
   type Subscriber,
   type MonthlyCreditSelection,
 } from "../server/db.js";
@@ -128,6 +129,12 @@ export async function retireForSubscriber(options: {
 
   // 1b. Look up subscriber's display name for personalized retirement reason
   const displayName = getUserDisplayNameBySubscriberId(db, subscriberId);
+
+  // 1c. Resolve retirement jurisdiction (#119). Prefer the user's saved
+  // country; fall back to config.defaultJurisdiction. Sub-national codes
+  // (e.g. US-OR) are passed through unchanged.
+  const subscriberJurisdiction =
+    getUserCountryBySubscriberId(db, subscriberId) ?? config.defaultJurisdiction;
 
   // 2. Calculate net and apply revenue split
   // If precomputedNetCents is provided (yearly monthly portions), skip Stripe fee deduction
@@ -458,7 +465,7 @@ export async function retireForSubscriber(options: {
           batchDenom: s.order.batch_denom,
           tradableAmount: "0",
           retiredAmount: s.quantity,
-          retirementJurisdiction: config.defaultJurisdiction,
+          retirementJurisdiction: subscriberJurisdiction,
           retirementReason,
         }));
 
@@ -523,7 +530,7 @@ export async function retireForSubscriber(options: {
             quantity: s.quantity,
             bidPrice: { denom: s.order.ask_denom, amount: s.order.ask_amount },
             disableAutoRetire: false,
-            retirementJurisdiction: config.defaultJurisdiction,
+            retirementJurisdiction: subscriberJurisdiction,
             retirementReason: retirementReason,
           }));
 

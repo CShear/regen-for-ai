@@ -399,6 +399,13 @@ export function getDb(dbPath = "data/regen-compute.db"): Database.Database {
     console.log("Migration: added display_name column to users");
   }
 
+  // Migration: add country to users (#119) — ISO 3166-1 alpha-2, used as the
+  // retirement jurisdiction for scheduled subscriber retirements.
+  if (!existingCols.includes("country")) {
+    _db.exec(`ALTER TABLE users ADD COLUMN country TEXT`);
+    console.log("Migration: added country column to users");
+  }
+
   // Migration: add payment_id to subscriber_retirements
   const retCols = (_db.pragma("table_info(subscriber_retirements)") as Array<{ name: string }>).map((c) => c.name);
   if (retCols.length > 0 && !retCols.includes("payment_id")) {
@@ -634,6 +641,8 @@ export interface User {
   badge_token: string | null;
   email: string | null;
   display_name: string | null;
+  /** ISO 3166-1 alpha-2 country code (#119). Null until set via Stripe sync or settings. */
+  country: string | null;
   balance_cents: number;
   stripe_customer_id: string | null;
   referral_code: string;
@@ -693,6 +702,49 @@ export function getUserDisplayNameBySubscriberId(db: Database.Database, subscrib
     "SELECT u.display_name FROM users u JOIN subscribers s ON s.user_id = u.id WHERE s.id = ?"
   ).get(subscriberId) as { display_name: string | null } | undefined;
   return row?.display_name ?? null;
+}
+
+/**
+ * Normalize an ISO 3166-1 alpha-2 country code. Accepts "us", "US-OR" (sub-national
+ * stays as-is, uppercased). Returns null for empty or obviously invalid input.
+ */
+function normalizeCountryCode(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim().toUpperCase();
+  // Alpha-2 (US) or alpha-2 with sub-national (US-OR). Anything outside this is rejected.
+  if (!/^[A-Z]{2}(-[A-Z0-9]{1,3})?$/.test(trimmed)) return null;
+  return trimmed;
+}
+
+export function setUserCountry(db: Database.Database, userId: number, country: string | null): void {
+  const normalized = normalizeCountryCode(country);
+  db.prepare("UPDATE users SET country = ?, updated_at = datetime('now') WHERE id = ?").run(normalized, userId);
+}
+
+/**
+ * Set country only if currently null. Used by the Stripe address sync so we
+ * never overwrite an explicit user setting with whatever Stripe collected.
+ */
+export function setUserCountryIfMissing(db: Database.Database, userId: number, country: string | null): boolean {
+  const normalized = normalizeCountryCode(country);
+  if (!normalized) return false;
+  const result = db.prepare(
+    "UPDATE users SET country = ?, updated_at = datetime('now') WHERE id = ? AND country IS NULL"
+  ).run(normalized, userId);
+  return result.changes > 0;
+}
+
+/**
+ * Resolve the retirement jurisdiction for a subscriber per #119:
+ *   1. user.country (explicit setting)
+ *   2. defaultFallback (typically config.defaultJurisdiction)
+ * Returns the resolved code (always non-null because fallback is required).
+ */
+export function getUserCountryBySubscriberId(db: Database.Database, subscriberId: number): string | null {
+  const row = db.prepare(
+    "SELECT u.country FROM users u JOIN subscribers s ON s.user_id = u.id WHERE s.id = ?"
+  ).get(subscriberId) as { country: string | null } | undefined;
+  return row?.country ?? null;
 }
 
 export function creditBalance(
