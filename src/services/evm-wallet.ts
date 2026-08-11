@@ -90,6 +90,26 @@ export interface SendUsdcResult {
   chain: string;
 }
 
+/** USDC has 6 decimals on every chain we support. */
+const USDC_DECIMALS = 6;
+
+/**
+ * Convert a USDC amount to base units (raw bigint), accepting either a number
+ * (typical from MCP tool callers) or a decimal string (preferred when the
+ * caller has a precise source). Audit C1: the previous implementation used
+ * `BigInt(Math.round(amountUsdc * 10 ** decimals))`, which does a float
+ * multiply that produces spurious low bits for many decimal inputs (e.g.
+ * `0.1 * 1_000_000 = 100000.00000000001`). This routes through ethers's
+ * decimal-string parser, which is exact.
+ */
+function usdcToBaseUnits(amountUsdc: number | string): bigint {
+  // Numbers are clamped to USDC_DECIMALS via toFixed before parsing — anything
+  // beyond that is sub-cent dust the chain can't represent anyway.
+  const asString =
+    typeof amountUsdc === "string" ? amountUsdc : amountUsdc.toFixed(USDC_DECIMALS);
+  return ethers.parseUnits(asString, USDC_DECIMALS);
+}
+
 /**
  * Send USDC to a recipient on the specified chain.
  * Returns the transaction hash once the tx is mined.
@@ -97,7 +117,7 @@ export interface SendUsdcResult {
 export async function sendUsdc(
   chain: string,
   toAddress: string,
-  amountUsdc: number
+  amountUsdc: number | string
 ): Promise<SendUsdcResult> {
   const provider = getProvider(chain);
   const wallet = getWallet().connect(provider);
@@ -105,16 +125,15 @@ export async function sendUsdc(
 
   const usdc = new ethers.Contract(usdcAddress, ERC20_ABI, wallet);
 
-  // USDC has 6 decimals
-  const decimals = 6;
-  const rawAmount = BigInt(Math.round(amountUsdc * 10 ** decimals));
+  const rawAmount = usdcToBaseUnits(amountUsdc);
 
   // Check balance first
   const balance: bigint = await usdc.balanceOf(wallet.address);
   if (balance < rawAmount) {
-    const balanceUsdc = Number(balance) / 10 ** decimals;
+    const balanceUsdc = ethers.formatUnits(balance, USDC_DECIMALS);
+    const requestedUsdc = ethers.formatUnits(rawAmount, USDC_DECIMALS);
     throw new Error(
-      `Insufficient USDC balance on ${chain}. Have: ${balanceUsdc.toFixed(2)} USDC, need: ${amountUsdc} USDC`
+      `Insufficient USDC balance on ${chain}. Have: ${balanceUsdc} USDC, need: ${requestedUsdc} USDC`
     );
   }
 
@@ -126,7 +145,10 @@ export async function sendUsdc(
     txHash: receipt.hash,
     from: wallet.address,
     to: toAddress,
-    amountUsdc: amountUsdc.toString(),
+    amountUsdc: typeof amountUsdc === "string" ? amountUsdc : amountUsdc.toString(),
     chain,
   };
 }
+
+/** Test-only export — pure helper, worth covering directly. */
+export const __evmWalletInternals = { usdcToBaseUnits, USDC_DECIMALS };

@@ -50,7 +50,7 @@ vi.mock("ethers", async () => {
 });
 
 // Import after mocks are set up
-const { getEvmAddress, isEvmWalletConfigured, sendUsdc } = await import(
+const { getEvmAddress, isEvmWalletConfigured, sendUsdc, __evmWalletInternals } = await import(
   "../services/evm-wallet.js"
 );
 
@@ -121,6 +121,58 @@ describe("evm-wallet", () => {
         "0x1234567890abcdef1234567890abcdef12345678",
         BigInt(10_000_000)
       );
+    });
+
+    it("accepts a string amount and passes the exact base units to transfer", async () => {
+      mockBalanceOf.mockResolvedValueOnce(BigInt(1_000_000_000));
+      mockWait.mockResolvedValueOnce({ hash: "0xdef" });
+      mockTransfer.mockResolvedValueOnce({ wait: mockWait });
+
+      await sendUsdc("base", "0x1234567890abcdef1234567890abcdef12345678", "12.345678");
+
+      expect(mockTransfer).toHaveBeenCalledWith(
+        "0x1234567890abcdef1234567890abcdef12345678",
+        BigInt(12_345_678),
+      );
+    });
+  });
+
+  describe("usdcToBaseUnits (audit C1)", () => {
+    const { usdcToBaseUnits } = __evmWalletInternals;
+
+    it("converts integer USDC amounts exactly", () => {
+      expect(usdcToBaseUnits(1)).toBe(1_000_000n);
+      expect(usdcToBaseUnits(100)).toBe(100_000_000n);
+    });
+
+    it("converts decimal string amounts exactly", () => {
+      expect(usdcToBaseUnits("0.000001")).toBe(1n);
+      expect(usdcToBaseUnits("12.345678")).toBe(12_345_678n);
+    });
+
+    it("REGRESSION: 0.1 USDC must be exactly 100_000 base units", () => {
+      // Old code: BigInt(Math.round(0.1 * 1_000_000))
+      //   0.1 * 1_000_000 = 100000.00000000001 (float artifact)
+      //   Math.round → 100000n (correct here, but the spurious bit
+      //   showed up at other scales). The new code goes through
+      //   ethers.parseUnits which is decimal-string exact.
+      expect(usdcToBaseUnits(0.1)).toBe(100_000n);
+      expect(usdcToBaseUnits("0.1")).toBe(100_000n);
+    });
+
+    it("clamps numbers beyond USDC's 6 decimals to representable precision", () => {
+      // (0.1234567).toFixed(6) === "0.123457" — toFixed rounds half-up.
+      // The chain can't represent sub-cent fractions, so this is the right
+      // behavior for a JS-number caller. A precision-sensitive caller should
+      // pass a string instead.
+      expect(usdcToBaseUnits(0.1234567)).toBe(123_457n);
+    });
+
+    it("rejects strings with more than 6 decimals (caller responsibility)", () => {
+      // ethers.parseUnits enforces this. The thrown error is informative
+      // — surfaces the precision mismatch loudly rather than silently
+      // truncating money.
+      expect(() => usdcToBaseUnits("0.1234567")).toThrow();
     });
   });
 });
