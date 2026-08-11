@@ -34,6 +34,7 @@ import {
 } from "../server/db.js";
 import { sendMonthlyEmails } from "./email.js";
 import { executeBurn, type BurnResult, formatBurnResult } from "./burn.js";
+import { buildRetirementReason } from "./retirement-reason.js";
 
 export interface PoolRunResult {
   poolRunId: number;
@@ -375,6 +376,16 @@ export async function executePoolRun(options: {
         continue;
       }
 
+      // #101 Phase A: structured JSON-LD reason so the on-chain retirement
+      // carries semantic context (period, source, methodology version).
+      // Backward-compatible — older indexers still see a valid string.
+      const period = poolRun.run_date.slice(0, 7); // YYYY-MM
+      const poolRetirementReason = buildRetirementReason({
+        note: `Monthly pool retirement covering ${subscribers.length} subscriber${subscribers.length === 1 ? "" : "s"}`,
+        period,
+        source: "subscription",
+      });
+
       // Build and broadcast MsgBuyDirect
       const buyOrders = selectedOrders.map((s) => ({
         sellOrderId: BigInt(s.order.id),
@@ -385,7 +396,7 @@ export async function executePoolRun(options: {
         },
         disableAutoRetire: false,
         retirementJurisdiction: config.defaultJurisdiction,
-        retirementReason: `Monthly pool retirement — Regen Compute`,
+        retirementReason: poolRetirementReason,
       }));
 
       const msg = {

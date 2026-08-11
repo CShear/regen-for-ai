@@ -284,6 +284,28 @@ describe("Pool Service", () => {
       expect(result.carbon.txHash).toBe("AABB1122,AABB1122");
     });
 
+    it("uses structured JSON-LD retirement reason on chain (#101 Phase A)", async () => {
+      addTestSubscribers(3, 500);
+
+      await executePoolRun({ dryRun: false });
+
+      const firstCall = vi.mocked(signAndBroadcast).mock.calls[0];
+      expect(firstCall).toBeDefined();
+      const buyMsg = firstCall![0][0] as {
+        value: { orders: Array<{ retirementReason: string }> };
+      };
+      const reasonStr = buyMsg.value.orders[0].retirementReason;
+
+      // Should parse as JSON, not be a plain English string.
+      const parsed = JSON.parse(reasonStr);
+      expect(parsed["@context"]).toBe("https://schema.regen.network/v1");
+      expect(parsed.type).toBe("ComputeFootprintRetirement");
+      expect(parsed.tool).toBe("regen-compute");
+      expect(parsed.source).toBe("subscription");
+      expect(parsed.period).toMatch(/^\d{4}-\d{2}$/);
+      expect(parsed.note).toMatch(/\d+ subscribers?/);
+    });
+
     it("records per-subscriber fractional attributions", async () => {
       // 2 subscribers with different amounts
       const user1 = db.prepare("INSERT INTO users (api_key, email) VALUES (?, ?)").run("rfa_a", "a@test.com");
