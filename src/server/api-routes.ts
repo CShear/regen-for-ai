@@ -11,6 +11,7 @@
  */
 
 import { Router, Request, Response, NextFunction } from "express";
+import { humanizeRetirementReason } from "../services/retirement-reason.js";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -697,7 +698,7 @@ export function createApiRoutes(
         batch_denom: retirement.batchDenom,
         owner: retirement.owner,
         jurisdiction: retirement.jurisdiction,
-        reason: retirement.reason || "Ecological regeneration",
+        reason: humanizeRetirementReason(retirement.reason) || "Ecological regeneration",
         timestamp: retirement.timestamp,
         block_height: retirement.blockHeight,
         tx_hash: retirement.txHash,

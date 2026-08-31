@@ -435,10 +435,7 @@ export async function retireForSubscriber(options: {
 
       const retirementMonth = new Date().toISOString().slice(0, 7);
       const retirementReason = buildRetirementReason({
-        note: displayName
-          ? `${displayName}'s monthly ecological contribution`
-          : "Subscription — ecological accountability for AI",
-        subscriberId,
+        displayName: displayName ?? undefined,
         period: retirementMonth,
         source: "subscription",
       });

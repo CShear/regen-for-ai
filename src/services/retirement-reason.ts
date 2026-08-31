@@ -1,39 +1,25 @@
 /**
- * Structured retirement reason builder.
+ * Retirement reason builder.
  *
- * Produces JSON-LD-compatible reason strings for MsgRetire and MsgSend
- * retirement fields. Backward-compatible — the reason field remains a
- * valid string, but now carries structured metadata for indexers and
- * claims engine consumers.
+ * Produces HUMAN-READABLE reason strings for MsgRetire and MsgSend
+ * retirement fields.
  *
- * See: https://github.com/regen-network/regen-compute/issues/101 (Phase A)
+ * History: issue #101 (Phase A) originally wrote JSON-LD structured
+ * metadata into the reason field. That JSON rendered as raw code on
+ * Regen Marketplace retirement certificates ("Reason" showing
+ * {"@context":...}), which buyers flagged (Aug 2026). The reason field
+ * is buyer-facing; machine attribution now lives in the tool name in
+ * the sentence. Legacy JSON reasons are cleaned for display via
+ * humanizeRetirementReason().
  */
 
-import { readFileSync } from "fs";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
+const BRAND = "Regen Compute";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-let _version: string | undefined;
-
-function getVersion(): string {
-  if (_version) return _version;
-  try {
-    const pkg = JSON.parse(readFileSync(join(__dirname, "..", "..", "package.json"), "utf8"));
-    _version = pkg.version;
-  } catch {
-    _version = "unknown";
-  }
-  return _version!;
-}
-
-export interface StructuredReasonOptions {
-  /** Human-readable note (e.g. subscriber name, context) */
+export interface RetirementReasonOptions {
+  /** Fully custom reason — used verbatim when provided. */
   note?: string;
-  /** Subscriber ID for per-subscriber retirements */
-  subscriberId?: number;
+  /** Subscriber display name for personalized subscription retirements. */
+  displayName?: string;
   /** Billing period (e.g. "2026-03") */
   period?: string;
   /** Source context: "mcp_tool" for direct retirements, "subscription" for scheduled */
@@ -41,38 +27,49 @@ export interface StructuredReasonOptions {
 }
 
 /**
- * Build a structured retirement reason string.
+ * Build a plain-language retirement reason string.
  *
- * The returned string is valid JSON that carries semantic context:
- * - @context for JSON-LD compatibility
- * - type to identify this as a Regen Compute retirement
- * - methodology reference for footprint estimation
- * - tool version for traceability
- *
- * Backward-compatible: older consumers that treat reason as plain text
- * will see valid JSON (which is a valid string).
+ * Examples:
+ *   "Monthly ecological contribution by Jane Doe via Regen Compute (2026-03)"
+ *   "Regenerative contribution via Regen Compute"
  */
-export function buildRetirementReason(options: StructuredReasonOptions = {}): string {
-  const reason: Record<string, unknown> = {
-    "@context": "https://schema.regen.network/v1",
-    type: "ComputeFootprintRetirement",
-    tool: "regen-compute",
-    version: getVersion(),
-    methodology: "Luccioni2023+IEA2024",
-    uncertaintyRange: "10x",
-  };
-
+export function buildRetirementReason(options: RetirementReasonOptions = {}): string {
   if (options.note) {
-    reason.note = options.note;
+    return options.period ? `${options.note} (${options.period})` : options.note;
   }
 
-  if (options.period) {
-    reason.period = options.period;
+  let base: string;
+  if (options.source === "subscription") {
+    base = options.displayName
+      ? `Monthly ecological contribution by ${options.displayName} via ${BRAND}`
+      : `Monthly ecological contribution via ${BRAND}`;
+  } else {
+    base = `Regenerative contribution via ${BRAND}`;
   }
 
-  if (options.source) {
-    reason.source = options.source;
-  }
+  return options.period ? `${base} (${options.period})` : base;
+}
 
-  return JSON.stringify(reason);
+/**
+ * Clean a retirement reason for display. Legacy retirements (pre Aug 2026)
+ * carry JSON-LD in the reason field — extract the human `note` (+ period)
+ * from those; pass every other reason through untouched.
+ */
+export function humanizeRetirementReason(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  const trimmed = reason.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return reason;
+  try {
+    const parsed = JSON.parse(trimmed);
+    const obj = Array.isArray(parsed) ? parsed[0] : parsed;
+    if (obj && typeof obj === "object") {
+      const note = typeof obj.note === "string" ? obj.note : null;
+      const period = typeof obj.period === "string" ? obj.period : null;
+      if (note) return period ? `${note} (${period})` : note;
+      if (typeof obj.tool === "string") return `Retired via ${obj.tool}`;
+    }
+  } catch {
+    // not JSON after all — fall through
+  }
+  return reason;
 }

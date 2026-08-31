@@ -10,6 +10,7 @@
 
 import { Router, Request, Response } from "express";
 import { getRetirementById, type Retirement } from "../services/indexer.js";
+import { humanizeRetirementReason } from "../services/retirement-reason.js";
 import { betaBannerCSS, betaBannerHTML, betaBannerJS } from "./beta-banner.js";
 import { brandFonts, brandCSS, brandHeader, brandFooter } from "./brand.js";
 
@@ -266,7 +267,7 @@ function renderCertificatePage(
           <tr><td class="cert-label">Credit Batch</td><td class="cert-value">${escapeHtml(retirement.batchDenom)}</td></tr>
           <tr><td class="cert-label">Beneficiary</td><td class="cert-value">${escapeHtml(retirement.owner)}</td></tr>
           <tr><td class="cert-label">Jurisdiction</td><td class="cert-value">${escapeHtml(retirement.jurisdiction || "N/A")}</td></tr>
-          <tr><td class="cert-label">Reason</td><td class="cert-value">${escapeHtml(retirement.reason || "Ecological regeneration")}</td></tr>
+          <tr><td class="cert-label">Reason</td><td class="cert-value">${escapeHtml(humanizeRetirementReason(retirement.reason) || "Ecological regeneration")}</td></tr>
           <tr><td class="cert-label">Date</td><td class="cert-value">${escapeHtml(date)}</td></tr>
         </table>
 
