@@ -445,6 +445,22 @@ export function getDb(dbPath = "data/regen-compute.db"): Database.Database {
     // Column already exists
   }
 
+  // Migration: prepaid over-retirement balance (Aug 2026 runaway compensation).
+  // While positive, recurring cycles consume this instead of retiring on-chain.
+  try {
+    _db.prepare("ALTER TABLE subscribers ADD COLUMN prepaid_credits_cents INTEGER NOT NULL DEFAULT 0").run();
+    console.log("Migration: added prepaid_credits_cents column to subscribers");
+  } catch (e) {
+    // Column already exists
+  }
+
+  // Migration: wallet spend log — feeds the daily on-chain spend cap guard.
+  _db.exec(`CREATE TABLE IF NOT EXISTS wallet_spend_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cents INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`);
+
   // Backfill referral codes for users that don't have one
   const usersWithoutCodes = _db.prepare(
     "SELECT id FROM users WHERE referral_code IS NULL"
@@ -1084,7 +1100,7 @@ export function createScheduledRetirement(
 
 export function getDueScheduledRetirements(db: Database.Database): ScheduledRetirement[] {
   return db.prepare(
-    "SELECT sr.* FROM scheduled_retirements sr JOIN subscribers s ON sr.subscriber_id = s.id WHERE (sr.status IN ('pending', 'partial') OR (sr.status = 'failed' AND sr.retry_count < 3)) AND sr.scheduled_date <= datetime('now') AND s.status = 'active' ORDER BY sr.scheduled_date ASC"
+    "SELECT sr.* FROM scheduled_retirements sr JOIN subscribers s ON sr.subscriber_id = s.id WHERE (sr.status = 'pending' OR (sr.status IN ('partial', 'failed') AND sr.retry_count < 3)) AND sr.scheduled_date <= datetime('now') AND s.status = 'active' ORDER BY sr.scheduled_date ASC"
   ).all() as ScheduledRetirement[];
 }
 

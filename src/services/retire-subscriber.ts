@@ -58,6 +58,9 @@ export interface SubscriberRetirementResult {
   totalCreditsRetired: number;
   totalSpentCents: number;
   errors: string[];
+  /** True when the cycle was covered by the subscriber's prepaid
+   *  over-retirement balance and no on-chain retirement was executed. */
+  coveredByPrepaid?: boolean;
 }
 
 export interface BatchRetirementResult {
@@ -92,6 +95,31 @@ export function calculateNetAfterStripe(grossCents: number): number {
  * When `precomputedNetCents` is provided, Stripe fee deduction is skipped
  * (caller already handled it). This is used for yearly monthly portions.
  */
+/** Hard daily cap on on-chain credit spending across all subscribers, in cents.
+ *  Runaway protection: any bug that loops purchases hits this wall instead of
+ *  draining the wallet. Override via DAILY_SPEND_CAP_CENTS for legitimate
+ *  high-volume days (e.g. backfills). */
+const DAILY_SPEND_CAP_CENTS = Number(process.env.DAILY_SPEND_CAP_CENTS ?? 5000);
+
+function checkAndRecordDailySpend(
+  db: Database.Database,
+  cents: number,
+  subscriberId: number,
+  batchDenom: string,
+): void {
+  const spent = (db.prepare(
+    "SELECT COALESCE(SUM(cents), 0) AS total FROM wallet_spend_log WHERE created_at >= datetime('now', 'start of day')"
+  ).get() as { total: number }).total;
+  if (spent + cents > DAILY_SPEND_CAP_CENTS) {
+    throw new Error(
+      `Daily on-chain spend cap reached: $${(spent / 100).toFixed(2)} spent today, ` +
+      `batch ${batchDenom} needs $${(cents / 100).toFixed(2)}, cap is $${(DAILY_SPEND_CAP_CENTS / 100).toFixed(2)} ` +
+      `(subscriber ${subscriberId}). Set DAILY_SPEND_CAP_CENTS higher if this volume is legitimate.`
+    );
+  }
+  db.prepare("INSERT INTO wallet_spend_log (cents) VALUES (?)").run(cents);
+}
+
 export async function retireForSubscriber(options: {
   subscriberId: number;
   grossAmountCents: number;
@@ -101,6 +129,11 @@ export async function retireForSubscriber(options: {
   dbPath?: string;
   dryRun?: boolean;
   overrideAddress?: string;
+  /** Consume the subscriber's prepaid over-retirement balance instead of
+   *  retiring on-chain, when it covers this cycle's credits budget.
+   *  Pass true only for recurring subscription cycles (webhook invoices and
+   *  scheduled yearly slices) — never for boosts/one-time purchases. */
+  applyPrepaidCredit?: boolean;
 }): Promise<SubscriberRetirementResult> {
   const { subscriberId, grossAmountCents, billingInterval, dryRun = false, paymentId } = options;
   const db = getDb(options.dbPath);
@@ -145,6 +178,44 @@ export async function retireForSubscriber(options: {
       batches: [], totalCreditsRetired: 0, totalSpentCents: 0,
       errors: ["Credits budget is zero after fees and split"],
     };
+  }
+
+  // 2b. Prepaid over-retirement credit: subscribers who were over-retired by the
+  // Aug 2026 retry runaway carry a prepaid balance. While it covers a cycle's
+  // credits budget, consume it instead of retiring again; on-chain retirement
+  // resumes automatically once the balance is exhausted. Burn/ops splits are
+  // unaffected (that revenue is real); only the credits leg is prepaid.
+  if (options.applyPrepaidCredit && !dryRun) {
+    const prepaidRow = db.prepare(
+      "SELECT prepaid_credits_cents FROM subscribers WHERE id = ?"
+    ).get(subscriberId) as { prepaid_credits_cents: number } | undefined;
+    const prepaid = prepaidRow?.prepaid_credits_cents ?? 0;
+    if (prepaid >= creditsBudgetCents) {
+      const consume = db.transaction(() => {
+        db.prepare(
+          "UPDATE subscribers SET prepaid_credits_cents = prepaid_credits_cents - ? WHERE id = ?"
+        ).run(creditsBudgetCents, subscriberId);
+        recordSubscriberRetirement(db, {
+          subscriberId, regenAddress, grossAmountCents, netAmountCents,
+          creditsBudgetCents, burnBudgetCents, opsBudgetCents,
+          batches: [], totalCreditsRetired: 0, totalSpentCents: 0,
+          paymentId,
+        });
+      });
+      consume();
+      console.log(
+        `Subscriber ${subscriberId}: credits budget $${(creditsBudgetCents / 100).toFixed(2)} ` +
+        `covered by prepaid over-retirement balance ` +
+        `($${((prepaid - creditsBudgetCents) / 100).toFixed(2)} remaining) — no on-chain retirement.`
+      );
+      return {
+        subscriberId, regenAddress, status: "success",
+        grossAmountCents, netAmountCents, creditsBudgetCents,
+        burnBudgetCents, opsBudgetCents,
+        batches: [], totalCreditsRetired: 0, totalSpentCents: 0,
+        errors: [], coveredByPrepaid: true,
+      };
+    }
   }
 
   // 3. Init wallet (unless dry run)
@@ -429,6 +500,10 @@ export async function retireForSubscriber(options: {
         continue;
       }
 
+      // Runaway guard: enforce the daily on-chain spend cap before broadcasting.
+      // Throws into the batch catch below, recording the error and alerting.
+      checkAndRecordDailySpend(db, result.spentCents, subscriberId, batchDenom);
+
       // Split selected orders into tradable vs retire-only
       const tradableSelected = selectedOrders.filter((s) => s.order.disable_auto_retire);
       const retireOnlySelected = selectedOrders.filter((s) => !s.order.disable_auto_retire);
@@ -608,7 +683,12 @@ export async function retireForSubscriber(options: {
     recordSubscriberRetirement(db, {
       subscriberId, regenAddress, grossAmountCents, netAmountCents,
       creditsBudgetCents, burnBudgetCents, opsBudgetCents,
-      batches: batchResults, totalCreditsRetired, totalSpentCents,
+      // IMPORTANT: record the MERGED results (prior successes + this attempt).
+      // recordSubscriberRetirement replaces all batch rows for this payment_id;
+      // recording only the new attempt's batches destroyed the record of
+      // previously-succeeded batches, so the next retry re-bought them on-chain
+      // every other hour (the Aug 2026 runaway that drained the master wallet).
+      batches: allBatchResults, totalCreditsRetired, totalSpentCents,
       paymentId,
     });
   }

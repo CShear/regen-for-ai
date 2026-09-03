@@ -3601,6 +3601,7 @@ function executeRetirementAsync(
       billingInterval,
       precomputedNetCents,
       paymentId,
+      applyPrepaidCredit: true,
     });
 
     if (!skipBurnAccumulation && result.burnBudgetCents > 0 && (result.status === "success" || result.status === "partial")) {
@@ -3611,10 +3612,14 @@ function executeRetirementAsync(
     if (result.status === "success") {
       console.log(
         `Retirement completed: subscriber=${subscriberId} credits=${result.totalCreditsRetired.toFixed(6)} ` +
-        `spent=$${(result.totalSpentCents / 100).toFixed(2)} status=${result.status}`
+        `spent=$${(result.totalSpentCents / 100).toFixed(2)} status=${result.status}` +
+        (result.coveredByPrepaid ? " (covered by prepaid over-retirement balance)" : "")
       );
-      // Send retirement notification email (fire-and-forget)
-      sendRetirementNotificationEmail(db, subscriberId, result, baseUrl).catch(() => {});
+      // Send retirement notification email (fire-and-forget).
+      // Skip when covered by prepaid — there is no new on-chain retirement to report.
+      if (!result.coveredByPrepaid) {
+        sendRetirementNotificationEmail(db, subscriberId, result, baseUrl).catch(() => {});
+      }
       // Invoke optional success callback (e.g., referral bonus email)
       if (onSuccess) {
         try { onSuccess(result); } catch (err) {
@@ -3640,6 +3645,7 @@ function executeRetirementAsync(
             billingInterval,
             precomputedNetCents,
             paymentId,
+            applyPrepaidCredit: true,
           });
           console.log(`Auto-retry result: subscriber ${subscriberId} status=${retryResult.status} credits=${retryResult.totalCreditsRetired}`);
         }).catch((err) => {
@@ -3682,6 +3688,7 @@ async function processScheduledRetirements(db: Database.Database, baseUrl?: stri
           billingInterval: scheduled.billing_interval as "monthly" | "yearly",
           precomputedNetCents: scheduled.net_amount_cents || undefined,
           paymentId: `scheduled-${scheduled.id}`,
+          applyPrepaidCredit: true,
         });
 
         // Yearly burn budget is front-loaded at payment time — skip per-month accumulation.
@@ -3699,10 +3706,12 @@ async function processScheduledRetirements(db: Database.Database, baseUrl?: stri
           });
           console.log(
             `Scheduled retirement completed: id=${scheduled.id} subscriber=${scheduled.subscriber_id} ` +
-            `credits=${result.totalCreditsRetired.toFixed(6)}`
+            `credits=${result.totalCreditsRetired.toFixed(6)}` +
+            (result.coveredByPrepaid ? " (covered by prepaid over-retirement balance)" : "")
           );
-          // Send retirement notification email
-          if (baseUrl) {
+          // Send retirement notification email (not for prepaid-covered cycles —
+          // there is no new on-chain retirement to report)
+          if (baseUrl && !result.coveredByPrepaid) {
             sendRetirementNotificationEmail(db, scheduled.subscriber_id, result, baseUrl).catch(() => {});
           }
         } else if (result.status === "partial") {
@@ -3711,6 +3720,7 @@ async function processScheduledRetirements(db: Database.Database, baseUrl?: stri
             accumulateBurnBudget(db, result.burnBudgetCents, "scheduled_retirement", scheduled.subscriber_id);
             maybeExecuteAutoBurn(db).catch(() => {});
           }
+          db.prepare("UPDATE scheduled_retirements SET retry_count = retry_count + 1 WHERE id = ?").run(scheduled.id);
           updateScheduledRetirement(db, scheduled.id, {
             status: "partial",
             error: result.errors.join("; "),
@@ -3721,6 +3731,10 @@ async function processScheduledRetirements(db: Database.Database, baseUrl?: stri
             `credits=${result.totalCreditsRetired.toFixed(6)} — will retry failed batches`
           );
         } else {
+          // Count result-status failures toward the retry cap too — previously only
+          // thrown errors incremented retry_count, so failed rows retried hourly
+          // forever (the loop that amplified the Aug 2026 runaway).
+          db.prepare("UPDATE scheduled_retirements SET retry_count = retry_count + 1 WHERE id = ?").run(scheduled.id);
           updateScheduledRetirement(db, scheduled.id, {
             status: "failed",
             error: result.errors.join("; "),
@@ -3728,7 +3742,7 @@ async function processScheduledRetirements(db: Database.Database, baseUrl?: stri
           });
           console.error(
             `Scheduled retirement failed: id=${scheduled.id} subscriber=${scheduled.subscriber_id} ` +
-            `errors=${JSON.stringify(result.errors)}`
+            `retry_count=${(scheduled.retry_count ?? 0) + 1} errors=${JSON.stringify(result.errors)}`
           );
         }
       });

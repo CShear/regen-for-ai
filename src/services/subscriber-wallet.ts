@@ -151,7 +151,19 @@ export function calculateFundingNeeded(
     });
   }
 
-  return { transfers };
+  // Merge same-denom entries and sort by denom: when the purchase cost denom is
+  // uregen (REGEN-priced sell order), the payment shortfall and the gas top-up
+  // would otherwise produce two uregen coins in one MsgSend, which the chain
+  // rejects as "invalid coins" (caused every C02-004 leg failure Aug 5–22, 2026).
+  const merged = new Map<string, bigint>();
+  for (const t of transfers) {
+    merged.set(t.denom, (merged.get(t.denom) ?? 0n) + t.amount);
+  }
+  const mergedTransfers = [...merged.entries()]
+    .map(([denom, amount]) => ({ denom, amount }))
+    .sort((a, b) => (a.denom < b.denom ? -1 : a.denom > b.denom ? 1 : 0));
+
+  return { transfers: mergedTransfers };
 }
 
 /**
