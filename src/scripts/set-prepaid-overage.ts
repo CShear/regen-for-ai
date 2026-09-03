@@ -81,13 +81,37 @@ async function main() {
   const subscribers = db.prepare(`
     SELECT s.id, s.regen_address, s.status, u.email
     FROM subscribers s LEFT JOIN users u ON u.id = s.user_id
-    WHERE s.regen_address IS NOT NULL
     ORDER BY s.id
-  `).all() as { id: number; regen_address: string; status: string; email: string | null }[];
+  `).all() as { id: number; regen_address: string | null; status: string; email: string | null }[];
 
+  // Use the addresses actually funded during retirements (subscriber_retirements
+  // rows), not just subscribers.regen_address: multi-sub consolidation can leave
+  // the subscribers-table address pointing at a shared wallet while the runaway
+  // funds went to the per-subscriber derived wallet.
+  const addressRows = db.prepare(
+    "SELECT DISTINCT subscriber_id, regen_address FROM subscriber_retirements WHERE regen_address IS NOT NULL"
+  ).all() as { subscriber_id: number; regen_address: string }[];
+  const addrsBySub = new Map<number, Set<string>>();
+  for (const r of addressRows) {
+    if (!addrsBySub.has(r.subscriber_id)) addrsBySub.set(r.subscriber_id, new Set());
+    addrsBySub.get(r.subscriber_id)!.add(r.regen_address);
+  }
+
+  const seenAddrs = new Set<string>();
   let totalOverage = 0;
   for (const sub of subscribers) {
-    const receivedMicro = await usdcReceivedFrom(config.lcdUrl, sub.regen_address, masterAddress);
+    const addrs = new Set<string>(addrsBySub.get(sub.id) ?? []);
+    if (sub.regen_address) addrs.add(sub.regen_address);
+
+    let receivedMicro = 0n;
+    for (const addr of addrs) {
+      if (seenAddrs.has(addr)) {
+        console.warn(`  WARN: address ${addr} already attributed to an earlier subscriber — skipping for subscriber=${sub.id}`);
+        continue;
+      }
+      seenAddrs.add(addr);
+      receivedMicro += await usdcReceivedFrom(config.lcdUrl, addr, masterAddress);
+    }
     const receivedCents = Number(receivedMicro / 10_000n); // 6-exp micro → cents
 
     const entitled = (db.prepare(
