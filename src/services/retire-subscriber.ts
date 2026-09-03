@@ -191,6 +191,27 @@ export async function retireForSubscriber(options: {
     ).get(subscriberId) as { prepaid_credits_cents: number } | undefined;
     const prepaid = prepaidRow?.prepaid_credits_cents ?? 0;
     if (prepaid >= creditsBudgetCents) {
+      // Idempotency: if a retirement record already exists for this payment
+      // (webhook redelivery, or a retry of a scheduled row that already ran),
+      // do not consume the prepaid balance a second time.
+      const existingForPayment = paymentId
+        ? db.prepare(
+            "SELECT id FROM subscriber_retirements WHERE payment_id = ? AND subscriber_id = ?"
+          ).get(paymentId, subscriberId) as { id: number } | undefined
+        : undefined;
+      if (existingForPayment) {
+        console.log(
+          `Subscriber ${subscriberId}: payment ${paymentId} already has a retirement record — ` +
+          `treating as covered by prepaid without consuming again.`
+        );
+        return {
+          subscriberId, regenAddress, status: "success",
+          grossAmountCents, netAmountCents, creditsBudgetCents,
+          burnBudgetCents, opsBudgetCents,
+          batches: [], totalCreditsRetired: 0, totalSpentCents: 0,
+          errors: [], coveredByPrepaid: true,
+        };
+      }
       const consume = db.transaction(() => {
         db.prepare(
           "UPDATE subscribers SET prepaid_credits_cents = prepaid_credits_cents - ? WHERE id = ?"
